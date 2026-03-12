@@ -1,0 +1,108 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  /* Grab cursor when the window is interactive (cursor over sheep) */
+  cursor: grab;
+}
+
+body.dragging {
+  cursor: grabbing;
+}
+
+#sheep-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Speech bubble */
+.speech-bubble {
+  position: fixed;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #eee;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-family: "Courier New", monospace;
+  font-size: 14px;
+  max-width: 300px;
+  min-width: 120px;
+  z-index: 1000;
+  border: 2px solid #e94560;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+/* Tail pointing down */
+.speech-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid #1a1a2e;
+}
+
+.speech-bubble-text {
+  line-height: 1.4;
+}
+
+/* Input bubble variant — needs to accept mouse events */
+.input-bubble {
+  pointer-events: auto;
+}
+
+.input-bubble-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.input-bubble-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #e94560;
+  border-radius: 6px;
+  background: #16213e;
+  color: #eee;
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  outline: none;
+}
+
+.input-bubble-input:focus {
+  border-color: #ff6b6b;
+  box-shadow: 0 0 6px rgba(233, 69, 96, 0.3);
+}
+
+.input-bubble-button {
+  padding: 6px 14px;
+  background: #e94560;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.input-bubble-button:hover {
+  background: #ff6b6b;
+}

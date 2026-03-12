@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Name your sheep!</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: 'Courier New', monospace;
+        background: #1a1a2e;
+        color: #eee;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        padding: 20px;
+      }
+      .container {
+        text-align: center;
+        width: 100%;
+      }
+      h1 {
+        font-size: 18px;
+        margin-bottom: 8px;
+        color: #e94560;
+      }
+      p {
+        font-size: 13px;
+        margin-bottom: 16px;
+        color: #aaa;
+      }
+      form {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+      }
+      input {
+        padding: 8px 12px;
+        border: 2px solid #e94560;
+        border-radius: 8px;
+        background: #16213e;
+        color: #eee;
+        font-family: 'Courier New', monospace;
+        font-size: 15px;
+        outline: none;
+        width: 200px;
+      }
+      input:focus {
+        border-color: #ff6b6b;
+        box-shadow: 0 0 8px rgba(233, 69, 96, 0.3);
+      }
+      button {
+        padding: 8px 18px;
+        background: #e94560;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-family: 'Courier New', monospace;
+        font-size: 15px;
+        font-weight: bold;
+      }
+      button:hover { background: #ff6b6b; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Baaaa!</h1>
+      <p>I just parachuted onto your desktop! What's my name?</p>
+      <form id="naming-form">
+        <input id="name-input" type="text" placeholder="Name your sheep..." autofocus />
+        <button type="submit">OK</button>
+      </form>
+    </div>
+    <script>
+      // Use the global Tauri API (withGlobalTauri: true)
+      document.getElementById('naming-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('name-input').value.trim();
+        if (name) {
+          await window.__TAURI__.core.invoke('save_sheep_name', { name });
+          // Window closes automatically from Rust side
+        }
+      });
+    </script>
+  </body>
+</html>
