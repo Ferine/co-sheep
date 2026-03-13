@@ -163,12 +163,36 @@
     </div>
 
     <div class="field">
-      <label>API Key</label>
-      <div class="api-key-row">
-        <input id="api-key" type="password" placeholder="sk-ant-..." />
-        <button class="toggle-btn" id="toggle-key" type="button">show</button>
+      <label>AI Provider</label>
+      <select id="ai-provider">
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="lmstudio">LM Studio (local)</option>
+      </select>
+      <div class="hint" id="provider-hint">Uses Claude Haiku + Sonnet via Anthropic API.</div>
+    </div>
+
+    <div id="anthropic-settings">
+      <div class="field">
+        <label>API Key</label>
+        <div class="api-key-row">
+          <input id="api-key" type="password" placeholder="sk-ant-..." />
+          <button class="toggle-btn" id="toggle-key" type="button">show</button>
+        </div>
+        <div class="hint">Stored locally in ~/.co-sheep/config.json. Falls back to ANTHROPIC_API_KEY env var.</div>
       </div>
-      <div class="hint">Stored locally in ~/.co-sheep/config.json. Falls back to ANTHROPIC_API_KEY env var.</div>
+    </div>
+
+    <div id="lmstudio-settings" style="display: none;">
+      <div class="field">
+        <label>LM Studio Endpoint</label>
+        <input id="lmstudio-endpoint" type="text" placeholder="http://localhost:1234" />
+        <div class="hint">The base URL where LM Studio server is running.</div>
+      </div>
+      <div class="field">
+        <label>Model</label>
+        <input id="lmstudio-model" type="text" placeholder="qwen3.5-9b" />
+        <div class="hint">Model identifier as shown in LM Studio. Must support vision.</div>
+      </div>
     </div>
 
     <div class="field">
@@ -228,6 +252,12 @@
       const saveBtn = document.getElementById('save-btn');
       const cancelBtn = document.getElementById('cancel-btn');
       const savedMsg = document.getElementById('saved-msg');
+      const aiProviderSelect = document.getElementById('ai-provider');
+      const providerHint = document.getElementById('provider-hint');
+      const anthropicSettings = document.getElementById('anthropic-settings');
+      const lmstudioSettings = document.getElementById('lmstudio-settings');
+      const lmstudioEndpoint = document.getElementById('lmstudio-endpoint');
+      const lmstudioModel = document.getElementById('lmstudio-model');
 
       const descriptions = {
         snarky: 'Judgmental and opinionated, like self-aware Clippy.',
@@ -235,6 +265,20 @@
         chaotic: 'Unhinged energy, zero filter, maximum sheep puns.',
         'passive-aggressive': 'Master of backhanded compliments and loud sighs.',
       };
+
+      const providerHints = {
+        anthropic: 'Uses Claude Haiku + Sonnet via Anthropic API.',
+        lmstudio: 'Uses a local model via LM Studio\'s OpenAI-compatible API.',
+      };
+
+      function updateProviderUI() {
+        const p = aiProviderSelect.value;
+        providerHint.textContent = providerHints[p] || '';
+        anthropicSettings.style.display = p === 'anthropic' ? '' : 'none';
+        lmstudioSettings.style.display = p === 'lmstudio' ? '' : 'none';
+      }
+
+      aiProviderSelect.addEventListener('change', updateProviderUI);
 
       function formatInterval(secs) {
         if (secs < 60) return secs + 's';
@@ -272,6 +316,9 @@
           intervalSecs: Number(intervalSlider.value),
           apiKey: apiKeyInput.value.trim(),
           language: languageSelect.value,
+          aiProvider: aiProviderSelect.value,
+          lmstudioEndpoint: lmstudioEndpoint.value.trim() || 'http://localhost:1234',
+          lmstudioModel: lmstudioModel.value.trim() || 'qwen3.5-9b',
         });
         savedMsg.classList.add('visible');
         setTimeout(() => savedMsg.classList.remove('visible'), 3000);
@@ -288,6 +335,10 @@
           personalitySelect.value = settings.personality || 'snarky';
           personalityDesc.textContent = descriptions[personalitySelect.value] || '';
           languageSelect.value = settings.language || 'nynorsk';
+          aiProviderSelect.value = settings.ai_provider || 'anthropic';
+          lmstudioEndpoint.value = settings.lmstudio_endpoint || 'http://localhost:1234';
+          lmstudioModel.value = settings.lmstudio_model || 'qwen3.5-9b';
+          updateProviderUI();
         } catch (e) {
           console.error('Failed to load settings:', e);
         }

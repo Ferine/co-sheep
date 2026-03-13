@@ -1,5 +1,6 @@
 use crate::capture;
 use crate::memory;
+use crate::onboarding;
 use crate::permissions;
 use crate::personality;
 use serde::Deserialize;
@@ -36,6 +37,27 @@ struct SonnetResponse {
 struct CommentaryEvent {
     text: String,
     animation: Option<String>,
+}
+
+/// Which AI backend to use
+enum AiProvider {
+    Anthropic { api_key: String },
+    LmStudio { endpoint: String, model: String },
+}
+
+fn get_provider() -> Result<AiProvider, String> {
+    let provider = onboarding::get_ai_provider();
+    match provider.as_str() {
+        "lmstudio" => Ok(AiProvider::LmStudio {
+            endpoint: onboarding::get_lmstudio_endpoint(),
+            model: onboarding::get_lmstudio_model(),
+        }),
+        _ => {
+            let api_key = onboarding::get_api_key()
+                .ok_or("No API key configured")?;
+            Ok(AiProvider::Anthropic { api_key })
+        }
+    }
 }
 
 pub async fn vision_loop(app: tauri::AppHandle) {
@@ -96,24 +118,52 @@ pub async fn vision_loop(app: tauri::AppHandle) {
 /// Emits user-facing messages via speech bubble for each failure.
 /// Returns true if everything is ready.
 async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
-    // 1. Check API key (config or env var)
-    if crate::onboarding::get_api_key().is_none() {
-        eprintln!("[co-sheep] No API key found (checked config + env)");
-        app.emit(
-            "sheep-commentary",
-            "I can't see anything without an API key! Open Settings from the tray menu, or set ANTHROPIC_API_KEY in your environment.",
-        )
-        .ok();
-        return false;
+    // 1. Check provider config
+    let provider = onboarding::get_ai_provider();
+    if provider == "anthropic" {
+        if crate::onboarding::get_api_key().is_none() {
+            eprintln!("[co-sheep] No API key found (checked config + env)");
+            app.emit(
+                "sheep-commentary",
+                "I can't see anything without an API key! Open Settings from the tray menu, or set ANTHROPIC_API_KEY in your environment.",
+            )
+            .ok();
+            return false;
+        }
+    } else if provider == "lmstudio" {
+        // Check LM Studio is reachable
+        let endpoint = onboarding::get_lmstudio_endpoint();
+        let url = format!("{}/v1/models", endpoint);
+        eprintln!("[co-sheep] Checking LM Studio at {}...", url);
+        match reqwest::Client::new().get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                eprintln!("[co-sheep] LM Studio is reachable");
+            }
+            Ok(resp) => {
+                eprintln!("[co-sheep] LM Studio returned status {}", resp.status());
+                app.emit(
+                    "sheep-commentary",
+                    "LM Studio is running but returned an error. Check that a model is loaded!",
+                )
+                .ok();
+                return false;
+            }
+            Err(e) => {
+                eprintln!("[co-sheep] Can't reach LM Studio: {}", e);
+                app.emit(
+                    "sheep-commentary",
+                    "Can't reach LM Studio! Make sure it's running and the server is started.",
+                )
+                .ok();
+                return false;
+            }
+        }
     }
 
     // 2. Check screen capture permission by actually trying a capture.
-    // CGPreflightScreenCaptureAccess() is unreliable for non-bundled binaries,
-    // so we skip it and go straight to a real capture test.
     if !permissions::has_screen_capture_permission() {
         eprintln!("[co-sheep] CGPreflight says no permission — requesting dialog");
         permissions::request_screen_capture_permission();
-        // Don't return false yet — try an actual capture anyway
     }
 
     // 3. Test capture — the real permission check
@@ -140,13 +190,12 @@ async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
     true
 }
 
-async fn run_vision_pipeline(
+pub async fn run_vision_pipeline(
     app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     eprintln!("[co-sheep] --- Vision pipeline tick ---");
 
-    let api_key = crate::onboarding::get_api_key()
-        .ok_or("No API key configured")?;
+    let provider = get_provider().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
     // Log preflight status but don't block — actual capture is the real test
     if !permissions::has_screen_capture_permission() {
@@ -158,11 +207,11 @@ async fn run_vision_pipeline(
     let screenshot_b64 =
         tokio::task::spawn_blocking(|| capture::capture_screen()).await??;
 
-    // Pass 1: Haiku classification (cheap)
-    eprintln!("[co-sheep] Pass 1: Sending to Haiku for classification...");
-    let classification = classify_screen(&api_key, &screenshot_b64).await?;
+    // Pass 1: Classification
+    eprintln!("[co-sheep] Pass 1: Classifying screen...");
+    let classification = classify_screen(&provider, &screenshot_b64).await?;
     eprintln!(
-        "[co-sheep] Haiku result: interesting={}, summary={}",
+        "[co-sheep] Classification: interesting={}, summary={}",
         classification.interesting, classification.summary
     );
 
@@ -176,17 +225,17 @@ async fn run_vision_pipeline(
         return Ok(());
     }
 
-    // Pass 2: Sonnet commentary (only when interesting)
-    eprintln!("[co-sheep] Pass 2: Sending to Sonnet for commentary...");
+    // Pass 2: Commentary (only when interesting)
+    eprintln!("[co-sheep] Pass 2: Generating commentary...");
     let recent_context = memory::get_recent_context().unwrap_or_default();
     let raw_response = generate_commentary(
-        &api_key,
+        &provider,
         &screenshot_b64,
         &classification.summary,
         &recent_context,
     )
     .await?;
-    eprintln!("[co-sheep] Sonnet raw response: {}", raw_response);
+    eprintln!("[co-sheep] Raw response: {}", raw_response);
 
     // Parse structured response
     let parsed = parse_commentary_response(&raw_response);
@@ -235,9 +284,9 @@ struct ParsedResponse {
     count: Option<String>,
 }
 
-/// Parse the Sonnet response as JSON {text, animation, memory}, falling back to plain text.
+/// Parse the response as JSON {text, animation, ...}, falling back to plain text.
 fn parse_commentary_response(raw: &str) -> ParsedResponse {
-    let trimmed = raw
+    let trimmed = strip_think_blocks(raw)
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
@@ -265,7 +314,7 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
         eprintln!("[co-sheep] Failed to parse as JSON, using raw text");
         ParsedResponse {
             event: CommentaryEvent {
-                text: raw.trim().to_string(),
+                text: strip_think_blocks(raw).trim().to_string(),
                 animation: None,
             },
             opinion_topic: None,
@@ -276,7 +325,9 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
     }
 }
 
-async fn classify_screen(
+// ─── Anthropic API ───────────────────────────────────────────────────────────
+
+async fn classify_screen_anthropic(
     api_key: &str,
     screenshot_b64: &str,
 ) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
@@ -298,7 +349,7 @@ async fn classify_screen(
                 },
                 {
                     "type": "text",
-                    "text": "Classify this screenshot. What app/website is active? Is anything notable happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content)?\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work."
+                    "text": CLASSIFY_PROMPT
                 }
             ]
         }]
@@ -324,21 +375,10 @@ async fn classify_screen(
         .as_str()
         .ok_or("No text in Haiku response")?;
 
-    // Parse JSON (strip any markdown wrapping)
-    let json_str = text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-
-    let classification: HaikuClassification = serde_json::from_str(json_str)
-        .map_err(|e| format!("Failed to parse Haiku response: {} — raw: {}", e, json_str))?;
-
-    Ok(classification)
+    parse_classification(text)
 }
 
-async fn generate_commentary(
+async fn generate_commentary_anthropic(
     api_key: &str,
     screenshot_b64: &str,
     context: &str,
@@ -365,8 +405,8 @@ async fn generate_commentary(
                 {
                     "type": "text",
                     "text": format!(
-                        "Context: {}\n\nGive a short snarky comment (1-2 sentences max) about what you see on this screen. Stay in character. Reference past observations if relevant. Reply with JSON: {{\"text\": \"your comment\", \"animation\": \"name_or_null\"}}",
-                        context
+                        "Context: {}\n\n{}",
+                        context, COMMENTARY_PROMPT
                     )
                 }
             ]
@@ -395,4 +435,179 @@ async fn generate_commentary(
         .to_string();
 
     Ok(text)
+}
+
+// ─── OpenAI-compatible API (LM Studio) ──────────────────────────────────────
+
+async fn classify_screen_openai(
+    endpoint: &str,
+    model: &str,
+    screenshot_b64: &str,
+) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/chat/completions", endpoint);
+    let image_url = format!("data:image/jpeg;base64,{}", screenshot_b64);
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": { "url": image_url }
+                },
+                {
+                    "type": "text",
+                    "text": format!("{} /no_think", CLASSIFY_PROMPT)
+                }
+            ]
+        }]
+    });
+
+    let resp = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().await.unwrap_or_default();
+        return Err(format!("LM Studio classify error ({}): {}", status, body_text).into());
+    }
+
+    let resp_json: serde_json::Value = resp.json().await?;
+    let text = extract_openai_text(&resp_json)?;
+
+    parse_classification(text)
+}
+
+async fn generate_commentary_openai(
+    endpoint: &str,
+    model: &str,
+    screenshot_b64: &str,
+    context: &str,
+    recent_journal: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/chat/completions", endpoint);
+    let system_prompt = personality::get_system_prompt(recent_journal);
+    let image_url = format!("data:image/jpeg;base64,{}", screenshot_b64);
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": image_url }
+                    },
+                    {
+                        "type": "text",
+                        "text": format!(
+                            "Context: {}\n\n{} /no_think",
+                            context, COMMENTARY_PROMPT
+                        )
+                    }
+                ]
+            }
+        ]
+    });
+
+    let resp = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().await.unwrap_or_default();
+        return Err(format!("LM Studio commentary error ({}): {}", status, body_text).into());
+    }
+
+    let resp_json: serde_json::Value = resp.json().await?;
+    let text = extract_openai_text(&resp_json)?;
+
+    Ok(text.to_string())
+}
+
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+const CLASSIFY_PROMPT: &str = "Classify this screenshot. What app/website is active? Is anything notable happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content)?\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work.";
+
+const COMMENTARY_PROMPT: &str = "Give a short snarky comment (1-2 sentences max) about what you see on this screen. Stay in character. Reference past observations if relevant. Reply with JSON: {\"text\": \"your comment\", \"animation\": \"name_or_null\"}";
+
+/// Strip `<think>...</think>` reasoning blocks that reasoning models (Qwen3.5, etc.) emit.
+fn strip_think_blocks(text: &str) -> &str {
+    // Find the last </think> and take everything after it
+    if let Some(pos) = text.rfind("</think>") {
+        text[pos + 8..].trim()
+    } else {
+        text
+    }
+}
+
+fn extract_openai_text(resp: &serde_json::Value) -> Result<&str, Box<dyn std::error::Error + Send + Sync>> {
+    resp["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "No text in OpenAI-compatible response".into())
+}
+
+fn parse_classification(text: &str) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
+    let cleaned = strip_think_blocks(text);
+    let json_str = cleaned
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    let classification: HaikuClassification = serde_json::from_str(json_str)
+        .map_err(|e| format!("Failed to parse classification: {} — raw: {}", e, json_str))?;
+
+    Ok(classification)
+}
+
+/// Dispatch to the correct backend
+async fn classify_screen(
+    provider: &AiProvider,
+    screenshot_b64: &str,
+) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
+    match provider {
+        AiProvider::Anthropic { api_key } => {
+            classify_screen_anthropic(api_key, screenshot_b64).await
+        }
+        AiProvider::LmStudio { endpoint, model } => {
+            classify_screen_openai(endpoint, model, screenshot_b64).await
+        }
+    }
+}
+
+async fn generate_commentary(
+    provider: &AiProvider,
+    screenshot_b64: &str,
+    context: &str,
+    recent_journal: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    match provider {
+        AiProvider::Anthropic { api_key } => {
+            generate_commentary_anthropic(api_key, screenshot_b64, context, recent_journal).await
+        }
+        AiProvider::LmStudio { endpoint, model } => {
+            generate_commentary_openai(endpoint, model, screenshot_b64, context, recent_journal)
+                .await
+        }
+    }
 }

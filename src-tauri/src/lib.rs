@@ -128,10 +128,13 @@ async fn save_settings(
     interval_secs: u64,
     api_key: String,
     language: String,
+    ai_provider: String,
+    lmstudio_endpoint: String,
+    lmstudio_model: String,
 ) -> Result<(), String> {
     eprintln!(
-        "[co-sheep] Saving settings: name={}, personality={}, interval={}s, language={}, api_key={}",
-        name, personality, interval_secs, language,
+        "[co-sheep] Saving settings: name={}, personality={}, interval={}s, language={}, provider={}, api_key={}",
+        name, personality, interval_secs, language, ai_provider,
         if api_key.is_empty() { "(empty)" } else { "(set)" }
     );
     let config = onboarding::SheepConfig {
@@ -140,6 +143,9 @@ async fn save_settings(
         interval_secs,
         api_key,
         language,
+        ai_provider,
+        lmstudio_endpoint,
+        lmstudio_model,
     };
     onboarding::write_config(&config).map_err(|e| e.to_string())
 }
@@ -269,6 +275,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let comment_now = tauri::menu::MenuItem::with_id(
+                app,
+                "comment_now",
+                "Comment Now",
+                true,
+                None::<&str>,
+            )?;
             let pause = tauri::menu::MenuItem::with_id(
                 app,
                 "pause",
@@ -280,7 +293,7 @@ pub fn run() {
                 tauri::menu::MenuItem::with_id(app, "quit", "Quit co-sheep", true, None::<&str>)?;
 
             // Tray icon menu
-            let tray_menu = tauri::menu::Menu::with_items(app, &[&settings_item, &memory_item, &pause, &quit])?;
+            let tray_menu = tauri::menu::Menu::with_items(app, &[&settings_item, &memory_item, &comment_now, &pause, &quit])?;
 
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -293,6 +306,15 @@ pub fn run() {
                         "pause" => {
                             let paused = COMMENTARY_PAUSED.load(Ordering::Relaxed);
                             COMMENTARY_PAUSED.store(!paused, Ordering::Relaxed);
+                        }
+                        "comment_now" => {
+                            let handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                eprintln!("[co-sheep] Manual commentary triggered");
+                                if let Err(e) = vision::run_vision_pipeline(&handle).await {
+                                    eprintln!("[co-sheep] Manual commentary failed: {}", e);
+                                }
+                            });
                         }
                         "settings" => {
                             let handle = app.clone();
@@ -330,6 +352,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let app_menu_comment_now = tauri::menu::MenuItem::with_id(
+                app,
+                "menu_comment_now",
+                "Comment Now",
+                true,
+                None::<&str>,
+            )?;
             let app_menu_pause = tauri::menu::MenuItem::with_id(
                 app,
                 "menu_pause",
@@ -355,7 +384,7 @@ pub fn run() {
                 app,
                 "co-sheep",
                 true,
-                &[&app_menu_settings, &app_menu_memory, &app_menu_pause, &app_menu_debug, &app_menu_quit],
+                &[&app_menu_settings, &app_menu_memory, &app_menu_comment_now, &app_menu_pause, &app_menu_debug, &app_menu_quit],
             )?;
             let app_menu = tauri::menu::Menu::with_items(app, &[&app_submenu])?;
             app.set_menu(app_menu)?;
@@ -366,6 +395,15 @@ pub fn run() {
                     "menu_pause" => {
                         let paused = COMMENTARY_PAUSED.load(Ordering::Relaxed);
                         COMMENTARY_PAUSED.store(!paused, Ordering::Relaxed);
+                    }
+                    "menu_comment_now" => {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            eprintln!("[co-sheep] Manual commentary triggered (menu)");
+                            if let Err(e) = vision::run_vision_pipeline(&handle).await {
+                                eprintln!("[co-sheep] Manual commentary failed: {}", e);
+                            }
+                        });
                     }
                     "menu_settings" => {
                         let handle = app.clone();

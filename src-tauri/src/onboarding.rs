@@ -11,6 +11,24 @@ pub struct SheepConfig {
     pub api_key: String,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_ai_provider")]
+    pub ai_provider: String,
+    #[serde(default = "default_lmstudio_endpoint")]
+    pub lmstudio_endpoint: String,
+    #[serde(default = "default_lmstudio_model")]
+    pub lmstudio_model: String,
+}
+
+fn default_ai_provider() -> String {
+    "anthropic".to_string()
+}
+
+fn default_lmstudio_endpoint() -> String {
+    "http://localhost:1234".to_string()
+}
+
+fn default_lmstudio_model() -> String {
+    "qwen3.5-9b".to_string()
 }
 
 fn default_language() -> String {
@@ -25,6 +43,9 @@ impl Default for SheepConfig {
             interval_secs: 150,
             api_key: String::new(),
             language: "nynorsk".to_string(),
+            ai_provider: "anthropic".to_string(),
+            lmstudio_endpoint: "http://localhost:1234".to_string(),
+            lmstudio_model: "qwen3.5-9b".to_string(),
         }
     }
 }
@@ -97,4 +118,22 @@ pub fn get_language() -> String {
     load_config()
         .map(|c| c.language)
         .unwrap_or_else(|| "nynorsk".to_string())
+}
+
+pub fn get_ai_provider() -> String {
+    load_config()
+        .map(|c| c.ai_provider)
+        .unwrap_or_else(|| "anthropic".to_string())
+}
+
+pub fn get_lmstudio_endpoint() -> String {
+    load_config()
+        .map(|c| c.lmstudio_endpoint)
+        .unwrap_or_else(|| "http://localhost:1234".to_string())
+}
+
+pub fn get_lmstudio_model() -> String {
+    load_config()
+        .map(|c| c.lmstudio_model)
+        .unwrap_or_else(|| "qwen3.5-9b".to_string())
 }
