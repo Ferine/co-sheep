@@ -1,6 +1,6 @@
 import { Sheep, DrawOverlay } from "./sheep";
 import { SpeechBubble } from "./speech-bubble";
-import { ConversationScript, FriendConfig, FriendPersonality, FRIEND_TINTS, SheepAnimation, SheepState } from "./types";
+import { ConversationScript, FriendConfig, FriendPersonality, FRIEND_TINTS, SheepAnimation, SheepState, WindowPlatform } from "./types";
 import { pickConversation, ConversationContext } from "./conversations";
 import { NightAmbience } from "./night-ambience";
 import { WeatherEffects } from "./weather-effects";
@@ -173,6 +173,12 @@ export class Flock {
   private aiChatPending: boolean = false;
   private aiChatCooldown: number = 0;
 
+  // Stampede
+  private stampedeCooldown: number = 0;
+  private stampedeActive: boolean = false;
+  private stampedeDialogueTimer: number = 0;
+
+
   /** Callback set by main.ts when break reminder fires */
   onBreakReminderFired: (() => void) | null = null;
 
@@ -297,6 +303,115 @@ export class Flock {
     return sheep.getRandomQuip();
   }
 
+  /** Trigger stampede — all sheep scatter in panic */
+  triggerStampede(mouseX: number, _mouseY: number) {
+    if (this.stampedeCooldown > 0 || this.stampedeActive) return;
+
+    this.stampedeActive = true;
+    this.stampedeDialogueTimer = 2500; // dialogue 2.5s after stampede starts
+    this.stampedeCooldown = 15000;
+
+    this.cancelConversation();
+
+    this.main.startStampede(mouseX);
+    for (const entry of this.friends.values()) {
+      entry.sheep.startStampede(mouseX);
+    }
+    console.log("[co-sheep] STAMPEDE triggered!");
+  }
+
+  /** Check if a dropped sheep should stack on another */
+  tryStack(droppedSheep: Sheep): Sheep | null {
+    const dropBottom = droppedSheep.y + droppedSheep.displaySize;
+    const dropCenterX = droppedSheep.x + droppedSheep.displaySize / 2;
+
+    const check = (target: Sheep): boolean => {
+      if (target === droppedSheep) return false;
+      if (target.stackedBy) return false; // already has something on top
+      const badStates: SheepState[] = ["grabbed", "parachute", "fall", "stampede", "trampoline", "stacked"];
+      if (badStates.includes(target.state)) return false;
+
+      const targetCenterX = target.x + target.displaySize / 2;
+      const xDist = Math.abs(dropCenterX - targetCenterX);
+      const yDist = dropBottom - target.y;
+
+      return xDist < target.displaySize * 0.7 && yDist > -target.displaySize * 0.3 && yDist < target.displaySize * 0.6;
+    };
+
+    for (const entry of Array.from(this.friends.values()).reverse()) {
+      if (check(entry.sheep)) return entry.sheep;
+    }
+    if (check(this.main)) return this.main;
+
+    return null;
+  }
+
+  /** Called when a sheep is stacked on another — triggers dialogue */
+  onSheepStacked(top: Sheep, bottom: Sheep) {
+    const topBubble = this.getBubble(top);
+    const bottomBubble = this.getBubble(bottom);
+
+    const topQuips = [
+      "I can see everything from up here!",
+      "The view is amazing!",
+      "Don't move!",
+      "I'm the king of the sheep!",
+      "Higher! HIGHER!",
+    ];
+    const bottomQuips = [
+      "HEY! Get off me!",
+      "I'm NOT a chair!",
+      "This is NOT okay.",
+      "My back... my poor back...",
+      "I didn't sign up for this.",
+    ];
+
+    bottomBubble.show(bottomQuips[Math.floor(Math.random() * bottomQuips.length)], 4000);
+    setTimeout(() => {
+      if (top.state === "stacked") {
+        topBubble.show(topQuips[Math.floor(Math.random() * topQuips.length)], 4000);
+      }
+    }, 1500);
+
+    bottom.playAnimation("headshake");
+    invoke("record_interaction", { interaction: `stacked ${top.id} on ${bottom.id}` });
+  }
+
+  /** Called when a sheep starts trampolining — triggers reactions */
+  onTrampolineStarted(sheep: Sheep) {
+    const TRAMPOLINE_REACTIONS: Record<FriendPersonality, string[]> = {
+      wholesome: ["WOAH! Are you okay?!", "Impressive!", "Do it again!"],
+      chaotic: ["YESSS! HIGHER! HIGHER!", "10/10! DO A FLIP!", "I WANT A TURN!"],
+      snarky: ["Show off.", "Physics isn't your strong suit.", "Gravity always wins."],
+      "passive-aggressive": ["Must be nice to fly...", "Oh, so YOU get to have fun.", "I'm fine down here."],
+    };
+
+    let count = 0;
+    for (const entry of this.friends.values()) {
+      if (count >= 2) break;
+      if (!this.isCalm(entry.sheep.state) || entry.bubble.visible) continue;
+      if (entry.sheep === sheep) continue;
+
+      const pool = TRAMPOLINE_REACTIONS[entry.personality] ?? TRAMPOLINE_REACTIONS.wholesome;
+      entry.pendingReaction = {
+        text: pool[Math.floor(Math.random() * pool.length)],
+        animation: "bounce",
+        delay: 800 + Math.random() * 1500,
+      };
+      count++;
+    }
+
+    invoke("record_interaction", { interaction: `trampoline by ${sheep.id}` });
+  }
+
+  /** Update window platforms and check validity */
+  setWindowPlatforms(platforms: WindowPlatform[]) {
+    this.main.platforms = platforms;
+    for (const entry of this.friends.values()) {
+      entry.sheep.platforms = platforms;
+    }
+  }
+
   /** Get all bounding boxes for cursor detection */
   getAllBounds(): Array<{ x: number; y: number; w: number; h: number }> {
     const pad = 12;
@@ -370,6 +485,19 @@ export class Flock {
     // Reactive emote cooldown
     if (this.reactiveCooldown > 0) this.reactiveCooldown -= dt;
     if (this.aiChatCooldown > 0) this.aiChatCooldown -= dt;
+    if (this.stampedeCooldown > 0) this.stampedeCooldown -= dt;
+
+    // Stampede post-dialogue
+    if (this.stampedeActive) {
+      this.stampedeDialogueTimer -= dt;
+      // Check if all sheep have stopped stampeding
+      const anyStampeding = this.main.state === "stampede" ||
+        Array.from(this.friends.values()).some(e => e.sheep.state === "stampede");
+      if (!anyStampeding && this.stampedeDialogueTimer <= 0) {
+        this.stampedeActive = false;
+        this.triggerStampedeDialogue();
+      }
+    }
 
     // Friend notifications
     this.checkFriendNotifications(dt);
@@ -807,5 +935,52 @@ export class Flock {
       // Schedule next quip 45-90s from now
       entry.nextQuipTime = now + 45000 + Math.random() * 45000;
     }
+  }
+
+  private triggerStampedeDialogue() {
+    // Find two calm sheep for a post-stampede conversation
+    const calmSheep: Array<{ id: string; sheep: Sheep; bubble: SpeechBubble }> = [];
+    if (this.isCalm(this.main.state) && !this.mainBubble.visible) {
+      calmSheep.push({ id: "main", sheep: this.main, bubble: this.mainBubble });
+    }
+    for (const [id, entry] of this.friends) {
+      if (this.isCalm(entry.sheep.state) && !entry.bubble.visible) {
+        calmSheep.push({ id, sheep: entry.sheep, bubble: entry.bubble });
+      }
+    }
+
+    if (calmSheep.length < 1) return;
+
+    const STAMPEDE_QUIPS_A = [
+      "What was THAT?!",
+      "I thought I was going to die!",
+      "MY HEART IS STILL RACING!",
+      "EARTHQUAKE?! PREDATOR?! WHAT?!",
+      "I saw my life flash before my eyes!",
+    ];
+    const STAMPEDE_QUIPS_B = [
+      "...I think it was the cursor.",
+      "We really need to stop panicking.",
+      "That was the cursor. Again.",
+      "I'm going to need therapy.",
+      "Same time tomorrow, probably.",
+    ];
+
+    const first = calmSheep[0];
+    first.bubble.show(STAMPEDE_QUIPS_A[Math.floor(Math.random() * STAMPEDE_QUIPS_A.length)], 4000);
+    first.sheep.playAnimation("vibrate");
+
+    if (calmSheep.length >= 2) {
+      const second = calmSheep[1];
+      second.sheep.resetActivity();
+      setTimeout(() => {
+        if (this.isCalm(second.sheep.state)) {
+          second.bubble.show(STAMPEDE_QUIPS_B[Math.floor(Math.random() * STAMPEDE_QUIPS_B.length)], 4000);
+          second.sheep.playAnimation("headshake");
+        }
+      }, 2000);
+    }
+
+    this.conversationCooldown = 30000;
   }
 }

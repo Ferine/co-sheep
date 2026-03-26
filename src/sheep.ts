@@ -1,5 +1,5 @@
 import { SpriteSheet } from "./sprite";
-import { FriendPersonality, SheepAnimation, SheepState } from "./types";
+import { FriendPersonality, SheepAnimation, SheepState, WindowPlatform } from "./types";
 
 const SPRITE_SIZE = 32;
 const SCALE = 3;
@@ -32,6 +32,18 @@ export class Sheep {
   facingRight: boolean = true;
   walkTarget: number | null = null;
   drawOverlay: DrawOverlay | null = null;
+
+  // Stacking
+  stackedOn: Sheep | null = null;
+  stackedBy: Sheep | null = null;
+
+  // Trampoline
+  trampolineBounces: number = 0;
+  private trampolineFlipProgress: number = 0;
+
+  // Window platforms
+  platforms: WindowPlatform[] = [];
+  currentPlatform: WindowPlatform | null = null;
 
   screenWidth: number;
   screenHeight: number;
@@ -150,15 +162,32 @@ export class Sheep {
   /** Called when the user clicks on the sheep to start dragging. */
   grab() {
     this.resetActivity();
+    // If something is stacked on us, make it fall
+    if (this.stackedBy) {
+      this.stackedBy.stackedOn = null;
+      this.stackedBy.vy = -150;
+      this.stackedBy.setState("fall", 0);
+      this.stackedBy = null;
+    }
+    // If we're stacked on something, unstack
+    if (this.stackedOn) {
+      this.stackedOn.stackedBy = null;
+      this.stackedOn = null;
+    }
+    this.currentPlatform = null;
     this.state = "grabbed";
     this.stateTimer = 0;
     this.vx = 0;
     this.vy = 0;
   }
 
-  /** Called when the user releases the sheep. Parachutes if airborne. */
+  /** Called when the user releases the sheep. Parachutes if airborne, trampolines if very high. */
   release() {
-    if (this.y < this.groundY - 10) {
+    const trampolineThreshold = this.screenHeight * 0.35;
+    if (this.y < trampolineThreshold) {
+      // Very high up — trampoline mode!
+      this.startTrampoline();
+    } else if (this.y < this.groundY - 10) {
       // Airborne — deploy parachute
       this.state = "parachute";
       this.stateTimer = 0;
@@ -210,6 +239,68 @@ export class Sheep {
       "Ow! Just kidding, I'm made of pixels.",
     ];
     return quips[Math.floor(Math.random() * quips.length)];
+  }
+
+  /** Start stampede — scatter away from the given X coordinate */
+  startStampede(mouseX: number) {
+    if (this.state === "parachute" || this.state === "stacked") return;
+    // Unstack if involved in a stack
+    if (this.stackedBy) {
+      this.stackedBy.stackedOn = null;
+      this.stackedBy.setState("stampede", 1500);
+      this.stackedBy.facingRight = Math.random() > 0.5;
+      this.stackedBy = null;
+    }
+    if (this.stackedOn) {
+      this.stackedOn.stackedBy = null;
+      this.stackedOn = null;
+    }
+    this.currentPlatform = null;
+    this.resetActivity();
+    this.setState("stampede", 1200 + Math.random() * 800);
+    // Run AWAY from mouse
+    this.facingRight = this.x > mouseX;
+    // If too close to edge, run the other way
+    if (!this.facingRight && this.x < 100) this.facingRight = true;
+    if (this.facingRight && this.x > this.screenWidth - 100) this.facingRight = false;
+  }
+
+  /** Start trampoline bouncing — called when dropped from very high */
+  startTrampoline() {
+    this.setState("trampoline", 12000); // max 12s
+    this.trampolineBounces = 0;
+    this.trampolineFlipProgress = 0;
+    this.vy = 0; // gravity will do the work
+  }
+
+  /** Stack this sheep on top of another */
+  stackOn(other: Sheep) {
+    this.stackedOn = other;
+    other.stackedBy = this;
+    this.setState("stacked", 0);
+    // Position on top
+    this.x = other.x + (other.displaySize - this.displaySize) / 2;
+    this.y = other.y - this.displaySize * 0.7;
+    this.facingRight = other.facingRight;
+  }
+
+  /** Unstack this sheep from whatever it's stacked on */
+  unstack() {
+    if (this.stackedOn) {
+      this.stackedOn.stackedBy = null;
+      this.stackedOn = null;
+    }
+  }
+
+  /** Called when the platform this sheep is standing on disappears */
+  loseGround() {
+    if (this.state === "grabbed" || this.state === "parachute" || this.state === "fall" || this.state === "trampoline") return;
+    this.currentPlatform = null;
+    this.state = "parachute";
+    this.stateTimer = 0;
+    this.vy = 0;
+    const sprite = this.sprites["parachute"];
+    if (sprite) sprite.reset();
   }
 
   /** Hit-test: is point (px, py) over the sheep? Uses a generous hitbox. */
@@ -291,6 +382,27 @@ export class Sheep {
       case "idle_sighing":
         this.updateIdleSighing();
         break;
+      case "stampede":
+        this.updateStampede(dt);
+        break;
+      case "trampoline":
+        this.updateTrampoline(dt);
+        break;
+      case "stacked":
+        this.updateStacked();
+        break;
+    }
+
+    // Check platform validity (if standing on a window that moved/closed)
+    if (this.currentPlatform && this.state !== "grabbed" && this.state !== "parachute"
+        && this.state !== "fall" && this.state !== "trampoline" && this.state !== "stampede") {
+      const p = this.currentPlatform;
+      const found = this.platforms.some(wp =>
+        Math.abs(wp.x - p.x) < 30 && Math.abs(wp.y - p.y) < 30 && Math.abs(wp.w - p.w) < 30
+      );
+      if (!found) {
+        this.loseGround();
+      }
     }
   }
 
@@ -309,9 +421,17 @@ export class Sheep {
     // Gentle side-to-side sway
     this.x += Math.sin(this.stateTimer / 500) * 0.5;
 
+    // Check platform landing first
+    if (this.checkPlatformLanding()) {
+      this.vy = 0;
+      this.setState("idle", 2000 + Math.random() * 3000);
+      return;
+    }
+
     if (this.y >= this.groundY) {
       this.y = this.groundY;
       this.vy = 0;
+      this.currentPlatform = null;
       this.setState("idle", 2000 + Math.random() * 3000);
     }
   }
@@ -325,6 +445,21 @@ export class Sheep {
   private updateWalk(dt: number) {
     const dir = this.facingRight ? 1 : -1;
     this.x += dir * this.walkSpeed * (dt / 1000);
+
+    // If on a window platform, check boundaries
+    if (this.currentPlatform) {
+      const p = this.currentPlatform;
+      if (this.x < p.x - this.displaySize * 0.3 || this.x + this.displaySize > p.x + p.w + this.displaySize * 0.3) {
+        // Walked off the edge! Fall with parachute
+        this.currentPlatform = null;
+        this.state = "parachute";
+        this.stateTimer = 0;
+        this.vy = 0;
+        const sprite = this.sprites["parachute"];
+        if (sprite) sprite.reset();
+        return;
+      }
+    }
 
     if (this.x <= 0) {
       this.x = 0;
@@ -368,12 +503,19 @@ export class Sheep {
   }
 
   private updateFall(dt: number) {
-    this.vy += 0.5 * 60 * (dt / 1000);
+    this.vy += 800 * (dt / 1000);
     this.y += this.vy * (dt / 1000);
+
+    if (this.checkPlatformLanding()) {
+      this.vy = 0;
+      this.setState("idle", 1000 + Math.random() * 2000);
+      return;
+    }
 
     if (this.y >= this.groundY) {
       this.y = this.groundY;
       this.vy = 0;
+      this.currentPlatform = null;
       this.setState("idle", 1000 + Math.random() * 2000);
     }
   }
@@ -565,6 +707,101 @@ export class Sheep {
     }
   }
 
+  private updateStampede(dt: number) {
+    const dir = this.facingRight ? 1 : -1;
+    const speed = ZOOM_SPEED * 1.5;
+    this.x += dir * speed * (dt / 1000);
+
+    if (this.x <= 0) {
+      this.x = 0;
+      this.setState("idle", 2000 + Math.random() * 3000);
+      return;
+    }
+    if (this.x >= this.screenWidth - this.displaySize) {
+      this.x = this.screenWidth - this.displaySize;
+      this.setState("idle", 2000 + Math.random() * 3000);
+      return;
+    }
+
+    if (this.stateTimer >= this.stateDuration) {
+      this.setState("idle", 2000 + Math.random() * 3000);
+    }
+  }
+
+  private updateTrampoline(dt: number) {
+    const GRAVITY = 1200;
+    const BOUNCE_DAMPING = 0.68;
+    const MAX_BOUNCES = 5;
+    const MIN_BOUNCE_VEL = 120;
+
+    this.vy += GRAVITY * (dt / 1000);
+    this.y += this.vy * (dt / 1000);
+
+    // Flip while airborne
+    if (this.y < this.groundY) {
+      this.trampolineFlipProgress += dt / 350;
+    }
+
+    if (this.y >= this.groundY) {
+      this.y = this.groundY;
+      this.trampolineBounces++;
+      this.trampolineFlipProgress = 0;
+
+      if (this.trampolineBounces >= MAX_BOUNCES || Math.abs(this.vy) * BOUNCE_DAMPING < MIN_BOUNCE_VEL) {
+        this.vy = 0;
+        this.setState("idle", 1000 + Math.random() * 2000);
+        return;
+      }
+
+      // Bounce!
+      this.vy = -Math.abs(this.vy) * BOUNCE_DAMPING;
+    }
+
+    if (this.stateTimer >= this.stateDuration) {
+      this.y = this.groundY;
+      this.vy = 0;
+      this.setState("idle", 1000 + Math.random() * 2000);
+    }
+  }
+
+  private updateStacked() {
+    if (!this.stackedOn) {
+      this.vy = -100;
+      this.setState("fall", 0);
+      return;
+    }
+
+    const target = this.stackedOn;
+    this.x = target.x + (target.displaySize - this.displaySize) / 2;
+    this.y = target.y - this.displaySize * 0.7;
+    this.facingRight = target.facingRight;
+
+    // Unstack if bottom sheep enters a wild state
+    if (target.state === "stampede" || target.state === "zoom" || target.state === "grabbed"
+        || target.state === "trampoline" || target.state === "backflip") {
+      this.unstack();
+      this.vy = -200;
+      this.setState("fall", 0);
+    }
+  }
+
+  /** Check if the sheep should land on a window platform during fall/parachute */
+  private checkPlatformLanding(): boolean {
+    for (const p of this.platforms) {
+      const landY = p.y - this.displaySize;
+      // Only land on platforms that are above the ground
+      if (landY >= this.groundY) continue;
+      if (this.y >= landY && this.y - 10 < landY + 20) {
+        if (this.x + this.displaySize > p.x && this.x < p.x + p.w) {
+          this.y = landY;
+          this.currentPlatform = p;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /** Map states to sprite sheet keys */
   private getSpriteKey(): string {
     switch (this.state) {
@@ -583,6 +820,9 @@ export class Sheep {
       case "idle_hearts": return "sit";
       case "idle_zooming": return "walk";
       case "idle_sighing": return "sit";
+      case "stampede": return "walk";
+      case "trampoline": return "fall";
+      case "stacked": return "sit";
       default: return this.state;
     }
   }
@@ -735,6 +975,54 @@ export class Sheep {
         break;
       }
 
+      case "stampede": {
+        // Heavy lean forward + aggressive speed lines
+        const stampLean = this.facingRight ? -0.25 : 0.25;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(stampLean);
+        ctx.scale(1.2, 0.85);
+        ctx.translate(-cx, -cy);
+        sprite.draw(ctx, this.x, this.y, this.drawScale, !this.facingRight, t);
+        const stampTrail = this.facingRight ? -1 : 1;
+        ctx.globalAlpha = 0.2;
+        sprite.draw(ctx, this.x + stampTrail * 25, this.y, this.drawScale, !this.facingRight, t);
+        ctx.globalAlpha = 0.1;
+        sprite.draw(ctx, this.x + stampTrail * 50, this.y, this.drawScale, !this.facingRight, t);
+        ctx.globalAlpha = 0.05;
+        sprite.draw(ctx, this.x + stampTrail * 75, this.y, this.drawScale, !this.facingRight, t);
+        ctx.restore();
+        break;
+      }
+
+      case "trampoline": {
+        // Squash/stretch + flip rotation
+        const tSquash = 1 + Math.abs(this.vy) * 0.0006;
+        const tScaleX = 1 / tSquash;
+        const tScaleY = tSquash;
+        const flipAngle = this.trampolineFlipProgress * Math.PI * 2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(flipAngle);
+        ctx.scale(tScaleX, tScaleY);
+        ctx.translate(-cx, -cy);
+        sprite.draw(ctx, this.x, this.y, this.drawScale, !this.facingRight, t);
+        ctx.restore();
+        break;
+      }
+
+      case "stacked": {
+        // Gentle wobble
+        const wobble = Math.sin(this.stateTimer / 300) * 0.08;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(wobble);
+        ctx.translate(-cx, -cy);
+        sprite.draw(ctx, this.x, this.y, this.drawScale, !this.facingRight, t);
+        ctx.restore();
+        break;
+      }
+
       default:
         sprite.draw(ctx, this.x, this.y, this.drawScale, !this.facingRight, t);
         break;
@@ -858,6 +1146,53 @@ export class Sheep {
 
     if (this.state === "idle_sighing") {
       this.drawSighing(ctx, cx, top);
+    }
+
+    if (this.state === "stampede") {
+      // Panic exclamation marks
+      ctx.save();
+      ctx.font = "bold 16px monospace";
+      ctx.fillStyle = "#e94560";
+      const panic = Math.sin(this.stateTimer / 80) * 4;
+      ctx.globalAlpha = 0.8;
+      ctx.fillText("!", cx - 4 + panic, top - 8);
+      ctx.fillText("!", cx + 8 - panic, top - 14);
+      ctx.restore();
+    }
+
+    if (this.state === "trampoline") {
+      // "BOING" on bounce (when near ground and going up)
+      if (this.vy < -100 && this.y > this.groundY - 60) {
+        ctx.save();
+        ctx.font = "bold 12px monospace";
+        ctx.fillStyle = "#FFD700";
+        ctx.globalAlpha = 0.9;
+        ctx.fillText("BOING!", cx - 20, top - 10);
+        ctx.restore();
+      }
+      // Sparkles while airborne
+      if (this.y < this.groundY - 30) {
+        ctx.save();
+        ctx.fillStyle = "#FFD700";
+        ctx.font = "14px serif";
+        const sparkT = this.stateTimer / 150;
+        ctx.globalAlpha = 0.6;
+        ctx.fillText("\u2728", cx - 25 + Math.sin(sparkT) * 10, top - 5);
+        ctx.fillText("\u2728", cx + 15 + Math.cos(sparkT) * 8, top + 10);
+        ctx.restore();
+      }
+    }
+
+    if (this.state === "stacked") {
+      // Balancing wobble indicator
+      const wobbleT = this.stateTimer / 500;
+      if (Math.sin(wobbleT * 2) > 0.7) {
+        ctx.save();
+        ctx.font = "10px monospace";
+        ctx.fillStyle = "rgba(233, 69, 96, 0.5)";
+        ctx.fillText("~", cx + this.displaySize * 0.3, top + 5);
+        ctx.restore();
+      }
     }
   }
 

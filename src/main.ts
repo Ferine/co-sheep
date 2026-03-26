@@ -27,6 +27,14 @@ const PET_THRESHOLD = 2000; // ms of hovering before petting starts
 // Chat input bubble
 let chatBubble: InputBubble | null = null;
 
+// Stampede detection
+const mouseHistory: Array<{ x: number; y: number; time: number }> = [];
+let lastStampedeTime = 0;
+const STAMPEDE_COOLDOWN = 15000;
+const STAMPEDE_SPEED_THRESHOLD = 3000; // px/s average speed
+const STAMPEDE_SAMPLES = 10;
+const STAMPEDE_MIN_REVERSALS = 3;
+
 // Throttle bounds updates to Rust (~20fps)
 let lastBoundsUpdate = 0;
 const BOUNDS_UPDATE_INTERVAL = 50;
@@ -78,6 +86,10 @@ async function init() {
   pollWeather();
   setInterval(pollWeather, 5 * 60 * 1000); // every 5 min
 
+  // --- Window position polling ---
+  pollWindows();
+  setInterval(pollWindows, 2000); // every 2s
+
   // --- Drag, toss, double-click, and petting handlers ---
 
   document.addEventListener("mousedown", (e) => {
@@ -108,7 +120,20 @@ async function init() {
     if (isDragging && dragTarget) {
       console.log(`[co-sheep] Release ${dragTarget.id}!`);
       isDragging = false;
-      dragTarget.release();
+
+      // Check for stacking first
+      const stackTarget = flock.tryStack(dragTarget);
+      if (stackTarget) {
+        dragTarget.stackOn(stackTarget);
+        flock.onSheepStacked(dragTarget, stackTarget);
+      } else {
+        dragTarget.release();
+        // Check if trampoline was triggered
+        if (dragTarget.state === "trampoline") {
+          flock.onTrampolineStarted(dragTarget);
+        }
+      }
+
       dragTarget = null;
       document.body.classList.remove("dragging");
       invoke("set_dragging", { dragging: false });
@@ -157,6 +182,41 @@ async function init() {
       if (hoverTarget) {
         hoverTarget.stopPetting();
         hoverTarget = null;
+      }
+    }
+  });
+
+  // Stampede detection: track rapid mouse shaking
+  document.addEventListener("mousemove", (e) => {
+    if (isDragging) return;
+
+    const now = performance.now();
+    mouseHistory.push({ x: e.clientX, y: e.clientY, time: now });
+    if (mouseHistory.length > STAMPEDE_SAMPLES + 1) {
+      mouseHistory.shift();
+    }
+
+    if (mouseHistory.length >= STAMPEDE_SAMPLES && now - lastStampedeTime > STAMPEDE_COOLDOWN) {
+      let totalDist = 0;
+      let reversals = 0;
+      for (let i = 1; i < mouseHistory.length; i++) {
+        const dx = mouseHistory[i].x - mouseHistory[i - 1].x;
+        const dy = mouseHistory[i].y - mouseHistory[i - 1].y;
+        totalDist += Math.sqrt(dx * dx + dy * dy);
+        if (i >= 2) {
+          const prevDx = mouseHistory[i - 1].x - mouseHistory[i - 2].x;
+          if ((dx > 0 && prevDx < 0) || (dx < 0 && prevDx > 0)) reversals++;
+        }
+      }
+      const elapsed = (mouseHistory[mouseHistory.length - 1].time - mouseHistory[0].time) / 1000;
+      const speed = elapsed > 0 ? totalDist / elapsed : 0;
+
+      if (speed > STAMPEDE_SPEED_THRESHOLD && reversals >= STAMPEDE_MIN_REVERSALS) {
+        const centerX = mouseHistory[mouseHistory.length - 1].x;
+        const centerY = mouseHistory[mouseHistory.length - 1].y;
+        flock.triggerStampede(centerX, centerY);
+        lastStampedeTime = now;
+        mouseHistory.length = 0;
       }
     }
   });
@@ -270,6 +330,15 @@ async function pollWeather() {
     flock.setWeatherCondition(condition);
   } catch (e) {
     console.log("[co-sheep] Weather poll failed:", e);
+  }
+}
+
+async function pollWindows() {
+  try {
+    const platforms = await invoke<Array<{ x: number; y: number; w: number; h: number }>>("get_window_positions");
+    flock.setWindowPlatforms(platforms);
+  } catch (e) {
+    // Window positions not available (command may not exist yet)
   }
 }
 

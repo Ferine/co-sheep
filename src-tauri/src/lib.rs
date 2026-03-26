@@ -8,6 +8,7 @@ mod personality;
 mod screen_info;
 mod vision;
 mod weather;
+mod windows;
 
 use base64::Engine;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -363,6 +364,12 @@ async fn get_weather_condition() -> Option<String> {
 }
 
 #[tauri::command]
+async fn get_window_positions() -> Vec<windows::WindowRect> {
+    let pid = std::process::id();
+    windows::get_visible_window_rects(pid)
+}
+
+#[tauri::command]
 async fn get_accessories() -> Vec<String> {
     onboarding::load_config()
         .map(|c| c.accessories)
@@ -513,6 +520,7 @@ pub fn run() {
             open_friends_window,
             save_moment,
             get_weather_condition,
+            get_window_positions,
             get_accessories,
             save_accessories,
             open_wardrobe_window,

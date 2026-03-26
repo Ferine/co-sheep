@@ -24,7 +24,10 @@ export type SheepState =
   | "idle_judging"
   | "idle_hearts"
   | "idle_zooming"
-  | "idle_sighing";
+  | "idle_sighing"
+  | "stampede"
+  | "trampoline"
+  | "stacked";
 
 export type SheepAnimation = "bounce" | "spin" | "backflip" | "headshake" | "zoom" | "vibrate";
 
@@ -57,6 +60,13 @@ export interface ConversationLine {
 }
 
 export type ConversationScript = ConversationLine[];
+
+export interface WindowPlatform {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 export const FRIEND_TINTS: Record<FriendColor, string> = {
   pink: "hsla(330, 70%, 70%, 0.35)",
