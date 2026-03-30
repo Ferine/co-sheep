@@ -1,7 +1,8 @@
 import { Sheep } from "./sheep";
 import { SpeechBubble } from "./speech-bubble";
+import type { EasterTheme } from "./easter-theme";
 
-export type GroupActivityType = "campfire_circle" | "follow_leader" | "sync_bounce" | "huddle";
+export type GroupActivityType = "campfire_circle" | "follow_leader" | "sync_bounce" | "huddle" | "easter_egg_hunt";
 
 export interface GroupActivity {
   type: GroupActivityType;
@@ -12,9 +13,29 @@ export interface GroupActivity {
   centerX: number;
   leaderId?: string;
   bounceCount?: number;
+  // Easter egg hunt state
+  eggAssignments?: Map<string, number>; // participant id → egg index
+  collectedEggs?: Set<number>;
+  eggReactionTimer?: number;
 }
 
 const DISPLAY_SIZE = 96;
+
+const EGG_HUNT_QUIPS = [
+  "Found one!",
+  "Egg-cellent!",
+  "This one's mine!",
+  "Over here!",
+  "Got it!",
+];
+
+const EGG_HUNT_PERSONALITY_QUIPS: Record<string, string[]> = {
+  snarky: ["These eggs are poorly hidden.", "Amateur hour.", "I found it first, obviously."],
+  wholesome: ["Best. Easter. Ever!", "What a pretty egg!", "This is so fun!"],
+  chaotic: ["EGG EGG EGG EGG", "THE EGG CHOSE ME", "I AM THE EGG LORD"],
+  "passive-aggressive": ["Oh, I found one. How... delightful.", "I suppose someone had to find it.", "How nice for me."],
+  good_colleague: ["Fint egg, ja", "Påskeegg!", "Nå snakker vi"],
+};
 
 /** Check if enough sheep are calm and near each other to start a group activity */
 export function canStartGroupActivity(
@@ -50,6 +71,7 @@ export function createGroupActivity(
     follow_leader: 10000 + Math.random() * 5000,
     sync_bounce: 6000,
     huddle: 10000 + Math.random() * 5000,
+    easter_egg_hunt: 20000 + Math.random() * 10000,
   };
 
   return {
@@ -61,10 +83,16 @@ export function createGroupActivity(
     centerX,
     leaderId: type === "follow_leader" ? participants[Math.floor(Math.random() * participants.length)] : undefined,
     bounceCount: type === "sync_bounce" ? 0 : undefined,
+    eggAssignments: type === "easter_egg_hunt" ? new Map() : undefined,
+    collectedEggs: type === "easter_egg_hunt" ? new Set() : undefined,
+    eggReactionTimer: type === "easter_egg_hunt" ? 0 : undefined,
   };
 }
 
-export function pickActivityType(): GroupActivityType {
+export function pickActivityType(easterTheme?: EasterTheme | null): GroupActivityType {
+  if (easterTheme?.active && Math.random() < 0.4) {
+    return "easter_egg_hunt";
+  }
   const types: GroupActivityType[] = ["campfire_circle", "follow_leader", "sync_bounce", "huddle"];
   return types[Math.floor(Math.random() * types.length)];
 }
@@ -73,7 +101,8 @@ export function pickActivityType(): GroupActivityType {
 export function updateGroupActivity(
   activity: GroupActivity,
   dt: number,
-  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble } | null,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+  easterTheme?: EasterTheme | null,
 ): boolean {
   activity.timer += dt;
 
@@ -81,7 +110,7 @@ export function updateGroupActivity(
     case "gathering":
       return updateGathering(activity, dt, getSheep);
     case "performing":
-      return updatePerforming(activity, dt, getSheep);
+      return updatePerforming(activity, dt, getSheep, easterTheme);
     case "dispersing":
       return updateDispersing(activity);
   }
@@ -121,6 +150,9 @@ function updateGathering(
     } else if (activity.type === "campfire_circle") {
       const first = getSheep(activity.participants[0]);
       if (first) first.bubble.show("Campfire time!", 3000);
+    } else if (activity.type === "easter_egg_hunt") {
+      const first = getSheep(activity.participants[0]);
+      if (first) first.bubble.show("Easter egg hunt!", 3000);
     }
   }
 
@@ -130,7 +162,8 @@ function updateGathering(
 function updatePerforming(
   activity: GroupActivity,
   dt: number,
-  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble } | null,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+  easterTheme?: EasterTheme | null,
 ): boolean {
   switch (activity.type) {
     case "campfire_circle": {
@@ -207,11 +240,22 @@ function updatePerforming(
       }
       break;
     }
+
+    case "easter_egg_hunt": {
+      updateEasterEggHunt(activity, dt, getSheep, easterTheme);
+      break;
+    }
   }
 
   if (activity.timer >= activity.duration) {
     activity.phase = "dispersing";
     activity.timer = 0;
+
+    // Reset eggs for next hunt
+    if (activity.type === "easter_egg_hunt" && easterTheme) {
+      easterTheme.resetEggs();
+    }
+
     // Release participants from forced states
     for (const id of activity.participants) {
       const entry = getSheep(id);
@@ -232,6 +276,94 @@ function updatePerforming(
   }
 
   return true;
+}
+
+function updateEasterEggHunt(
+  activity: GroupActivity,
+  _dt: number,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+  easterTheme?: EasterTheme | null,
+) {
+  if (!easterTheme || !activity.eggAssignments || !activity.collectedEggs) return;
+
+  const eggs = easterTheme.getEggPositions();
+  const uncollected = eggs.map((e, i) => ({ ...e, index: i })).filter((e) => !e.found && !activity.collectedEggs!.has(e.index));
+
+  // Assign unassigned participants to eggs
+  for (const id of activity.participants) {
+    if (activity.eggAssignments.has(id)) {
+      // Check if their target egg was already collected
+      const targetIdx = activity.eggAssignments.get(id)!;
+      if (activity.collectedEggs.has(targetIdx)) {
+        activity.eggAssignments.delete(id);
+      }
+    }
+
+    if (!activity.eggAssignments.has(id) && uncollected.length > 0) {
+      // Assign nearest uncollected egg
+      const entry = getSheep(id);
+      if (!entry) continue;
+      let nearest = uncollected[0];
+      let nearestDist = Math.abs(entry.sheep.x - nearest.x);
+      for (const egg of uncollected) {
+        const dist = Math.abs(entry.sheep.x - egg.x);
+        if (dist < nearestDist) {
+          nearest = egg;
+          nearestDist = dist;
+        }
+      }
+      activity.eggAssignments.set(id, nearest.index);
+      // Remove from uncollected so others pick different eggs
+      const idx = uncollected.indexOf(nearest);
+      if (idx >= 0) uncollected.splice(idx, 1);
+    }
+  }
+
+  // Move participants toward their eggs and check for collection
+  for (const id of activity.participants) {
+    const entry = getSheep(id);
+    if (!entry) continue;
+
+    const targetIdx = activity.eggAssignments.get(id);
+    if (targetIdx === undefined) {
+      // No eggs left to find — sit happily
+      if (entry.sheep.state !== "sit" && entry.sheep.state !== "idle") {
+        (entry.sheep as any).state = "sit";
+        (entry.sheep as any).stateTimer = 0;
+        (entry.sheep as any).stateDuration = activity.duration;
+      }
+      continue;
+    }
+
+    const egg = eggs[targetIdx];
+    if (!egg) continue;
+
+    // Check if reached the egg (before setting walk target so we don't overshoot)
+    if (Math.abs(entry.sheep.x - egg.x) < DISPLAY_SIZE) {
+      activity.collectedEggs!.add(targetIdx);
+      activity.eggAssignments.delete(id);
+      easterTheme.collectEgg(targetIdx);
+
+      // Show reaction
+      entry.sheep.playAnimation("bounce");
+      const personalityKey = entry.personality || (id === "good_colleague" ? "good_colleague" : "");
+      const quipPool = EGG_HUNT_PERSONALITY_QUIPS[personalityKey] || EGG_HUNT_QUIPS;
+      const quip = quipPool[Math.floor(Math.random() * quipPool.length)];
+      entry.bubble.show(quip, 3000);
+      continue;
+    }
+
+    // Walk toward egg — force into walk state if sitting/idling
+    entry.sheep.walkTarget = egg.x;
+    const state = entry.sheep.state;
+    if (state === "idle" || state === "sit" || state === "idle_sleep" || state === "idle_campfire" ||
+        state === "idle_counting" || state === "idle_egg_painting") {
+      entry.sheep.facingRight = egg.x > entry.sheep.x;
+      (entry.sheep as any).state = "walk";
+      (entry.sheep as any).stateTimer = 0;
+      (entry.sheep as any).stateDuration = 15000; // long enough to reach the egg
+    }
+  }
 }
 
 function updateDispersing(activity: GroupActivity): boolean {

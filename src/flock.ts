@@ -7,6 +7,7 @@ import { WeatherEffects } from "./weather-effects";
 import { getPersonalityQuips, getPersonalityAnimBias } from "./friend-personalities";
 import { createCompositeOverlay } from "./accessories";
 import { GroupActivity, canStartGroupActivity, createGroupActivity, pickActivityType, updateGroupActivity } from "./group-activities";
+import { EasterTheme } from "./easter-theme";
 import { invoke } from "@tauri-apps/api/core";
 
 const GOOD_COLLEAGUE_QUIPS = [
@@ -106,7 +107,7 @@ const drawGoodColleagueOverlay: DrawOverlay = (
   ctx.restore();
 
   // --- Coffee mug (only when idle/sitting) ---
-  const restingStates: SheepState[] = ["idle", "sit", "idle_sleep", "idle_campfire", "idle_counting"];
+  const restingStates: SheepState[] = ["idle", "sit", "idle_sleep", "idle_campfire", "idle_counting", "idle_egg_painting"];
   if (restingStates.includes(state)) {
     const mugX = facingRight ? x + size * 0.82 : x + size * 0.02;
     const mugY = y + size * 0.6;
@@ -162,6 +163,7 @@ export class Flock {
   private conversationCooldown: number = 0;
   private nightAmbience: NightAmbience;
   private weatherEffects: WeatherEffects;
+  private easterTheme: EasterTheme;
   private reactiveCooldown: number = 0;
   private currentWeatherCondition: string | null = null;
   private lastNotificationHour: number = -1;
@@ -186,12 +188,14 @@ export class Flock {
     this.screenWidth = screenWidth;
     this.screenHeight = screenHeight;
 
-    // Create main sheep
-    this.main = new Sheep(screenWidth, screenHeight, "main");
-    this.mainBubble = new SpeechBubble(true);
-
     this.nightAmbience = new NightAmbience(screenWidth, screenHeight);
     this.weatherEffects = new WeatherEffects();
+    this.easterTheme = new EasterTheme(screenWidth, screenHeight);
+
+    // Create main sheep
+    this.main = new Sheep(screenWidth, screenHeight, "main");
+    this.main.setEasterTheme(this.easterTheme);
+    this.mainBubble = new SpeechBubble(true);
 
     // Wire AI commentary animations to main sheep
     this.mainBubble.onAnimation = (anim) => {
@@ -213,6 +217,7 @@ export class Flock {
     const tint = FRIEND_TINTS["blue"];
     const startX = Math.random() * (this.screenWidth - DISPLAY_SIZE * 2) + DISPLAY_SIZE / 2;
     const sheep = new Sheep(this.screenWidth, this.screenHeight, "good_colleague", tint, startX);
+    sheep.setEasterTheme(this.easterTheme);
     sheep.name = "Good Colleague";
     sheep.drawOverlay = drawGoodColleagueOverlay;
 
@@ -236,6 +241,7 @@ export class Flock {
     const scale = config.scale ?? (0.85 + Math.random() * 0.3); // 0.85–1.15
     const startX = Math.random() * (this.screenWidth - DISPLAY_SIZE * 2) + DISPLAY_SIZE / 2;
     const sheep = new Sheep(this.screenWidth, this.screenHeight, config.id, tint, startX, scale);
+    sheep.setEasterTheme(this.easterTheme);
     sheep.name = config.name;
 
     const personality: FriendPersonality = config.personality ?? "wholesome";
@@ -443,6 +449,7 @@ export class Flock {
       entry.sheep.screenHeight = h;
     }
     this.nightAmbience.updateScreenSize(w, h);
+    this.easterTheme.updateScreenSize(w, h);
   }
 
   setWeatherCondition(c: string | null) {
@@ -469,6 +476,7 @@ export class Flock {
     }
     this.nightAmbience.update(dt, sheepPositions);
     this.weatherEffects.update(dt, this.screenWidth, this.screenHeight);
+    this.easterTheme.update(dt, sheepPositions);
 
     // Update speech bubble positions
     this.mainBubble.updatePosition(this.main.x, this.main.y, this.main.displaySize);
@@ -521,15 +529,15 @@ export class Flock {
     if (this.activeConversation) {
       this.activeConversation = null;
     }
-    if (this.groupActivity) {
-      this.groupActivity = null;
-      this.groupActivityCooldown = 300000 + Math.random() * 300000;
-    }
+    this.clearGroupActivity(true);
   }
 
   draw(ctx: CanvasRenderingContext2D) {
     // Night ambience background (stars, moonlight) — behind everything
     this.nightAmbience.drawBackground(ctx, this.screenWidth, this.screenHeight);
+
+    // Easter theme background (flowers) — behind sheep
+    this.easterTheme.drawBackground(ctx, this.screenWidth, this.screenHeight);
 
     // Main sheep first (behind friends)
     this.main.draw(ctx);
@@ -546,6 +554,9 @@ export class Flock {
       positions.push({ x: entry.sheep.x, y: entry.sheep.y, state: entry.sheep.state });
     }
 
+    // Easter theme foreground (petals, eggs) — on top of sheep
+    this.easterTheme.drawForeground(ctx, this.screenWidth, this.screenHeight);
+
     // Weather particles (rain/snow) — on top of sheep
     this.weatherEffects.draw(ctx);
 
@@ -560,10 +571,9 @@ export class Flock {
 
     if (this.groupActivity) {
       const getSheep = (id: string) => this.getSheepById(id);
-      const alive = updateGroupActivity(this.groupActivity, dt, getSheep);
+      const alive = updateGroupActivity(this.groupActivity, dt, getSheep, this.easterTheme);
       if (!alive) {
-        this.groupActivity = null;
-        this.groupActivityCooldown = 300000 + Math.random() * 300000; // 5-10 min
+        this.clearGroupActivity();
       }
       return;
     }
@@ -592,7 +602,7 @@ export class Flock {
     }
     const centerX = sumX / participants.length;
 
-    const type = pickActivityType();
+    const type = pickActivityType(this.easterTheme);
     this.groupActivity = createGroupActivity(type, participants, centerX);
     console.log(`[co-sheep] Group activity started: ${type} with ${participants.length} participants`);
   }
@@ -724,15 +734,39 @@ export class Flock {
     }
   }
 
-  private getSheepById(id: string): { sheep: Sheep; bubble: SpeechBubble } | null {
+  private getSheepById(id: string): { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null {
     if (id === "main") return { sheep: this.main, bubble: this.mainBubble };
     const entry = this.friends.get(id);
-    if (entry) return { sheep: entry.sheep, bubble: entry.bubble };
+    if (entry) return { sheep: entry.sheep, bubble: entry.bubble, personality: entry.personality || (id === "good_colleague" ? "good_colleague" : undefined) };
     return null;
   }
 
   private isCalm(state: SheepState): boolean {
     return state === "idle" || state === "sit" || state === "walk";
+  }
+
+  private clearGroupActivity(cancelledEarly: boolean = false) {
+    if (!this.groupActivity) return;
+
+    if (this.groupActivity.type === "easter_egg_hunt") {
+      this.easterTheme.resetEggs();
+    }
+
+    // Release participants from activity-driven states so they don't keep walking toward stale targets
+    if (cancelledEarly) {
+      for (const id of this.groupActivity.participants) {
+        const entry = this.getSheepById(id);
+        if (entry) {
+          entry.sheep.walkTarget = null;
+          (entry.sheep as any).state = "idle";
+          (entry.sheep as any).stateTimer = 0;
+          (entry.sheep as any).stateDuration = 1000 + Math.random() * 2000;
+        }
+      }
+    }
+
+    this.groupActivity = null;
+    this.groupActivityCooldown = 300000 + Math.random() * 300000;
   }
 
   private updateConversations(dt: number) {
@@ -812,6 +846,7 @@ export class Flock {
           personalityB: bEntry?.personality,
           weather: this.currentWeatherCondition,
           hour: new Date().getHours(),
+          easterTheme: this.easterTheme,
         };
         const script = pickConversation(a.id, b.id, ctx);
         if (!script) continue;

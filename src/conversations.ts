@@ -1,4 +1,5 @@
 import { ConversationScript, FriendPersonality } from "./types";
+import type { EasterTheme } from "./easter-theme";
 
 type ScriptTemplate = ConversationScript;
 
@@ -7,6 +8,7 @@ export interface ConversationContext {
   personalityB?: FriendPersonality;
   weather?: string | null;
   hour?: number;
+  easterTheme?: EasterTheme | null;
 }
 
 // $A and $B are placeholders resolved at pick time
@@ -256,6 +258,68 @@ const NICE_WEATHER_SCRIPTS: ScriptTemplate[] = [
   ],
 ];
 
+// --- Easter ---
+
+const EASTER_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "$A", text: "I found more eggs than you.", duration: 3500, delay: 0 },
+    { speakerId: "$B", text: "It's not a competition.", duration: 3000, delay: 700 },
+    { speakerId: "$A", text: "That's what losers say.", duration: 3000, delay: 600, animation: "bounce" },
+  ],
+  [
+    { speakerId: "$A", text: "Do you think the eggs were always here?", duration: 4000, delay: 0 },
+    { speakerId: "$B", text: "What do you mean?", duration: 2500, delay: 800 },
+    { speakerId: "$A", text: "Like... who hides them? We're sheep.", duration: 4000, delay: 700, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "I'm going to eat all the chocolate eggs.", duration: 4000, delay: 0, animation: "bounce" },
+    { speakerId: "$B", text: "Those are painted. Not chocolate.", duration: 3500, delay: 700 },
+    { speakerId: "$A", text: "...what.", duration: 2000, delay: 600, animation: "vibrate" },
+  ],
+  [
+    { speakerId: "$A", text: "Happy Easter!", duration: 2500, delay: 0, animation: "bounce" },
+    { speakerId: "$B", text: "Baaaa-ster.", duration: 3000, delay: 600, animation: "spin" },
+    { speakerId: "$A", text: "Please stop.", duration: 2500, delay: 700, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "Why does Easter move every year?", duration: 3500, delay: 0 },
+    { speakerId: "$B", text: "Something about the moon.", duration: 3000, delay: 800 },
+    { speakerId: "$A", text: "The moon controls us all.", duration: 3500, delay: 600, animation: "vibrate" },
+  ],
+  [
+    { speakerId: "$A", text: "I've been painting eggs all day.", duration: 3500, delay: 0 },
+    { speakerId: "$B", text: "They're beautiful.", duration: 2500, delay: 700, animation: "bounce" },
+    { speakerId: "$A", text: "Thanks. I can't feel my hooves.", duration: 3500, delay: 600 },
+  ],
+  [
+    { speakerId: "$A", text: "Do we get Easter off?", duration: 3000, delay: 0 },
+    { speakerId: "$B", text: "Off from what? We stand on a desktop.", duration: 4000, delay: 700 },
+    { speakerId: "$A", text: "Fair point.", duration: 2000, delay: 600, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "Spring is here! I can feel it!", duration: 3500, delay: 0, animation: "bounce" },
+    { speakerId: "$B", text: "You can feel the changing of seasons?", duration: 3500, delay: 700 },
+    { speakerId: "$A", text: "No, I just read the calendar.", duration: 3000, delay: 600 },
+  ],
+];
+
+const EASTER_GC_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "good_colleague", text: "Påskeegg er seriøs business.", duration: 3500, delay: 0 },
+    { speakerId: "$OTHER", text: "What?", duration: 2000, delay: 800 },
+    { speakerId: "good_colleague", text: "Nå er det påske, ja.", duration: 3000, delay: 600, animation: "headshake" },
+  ],
+  [
+    { speakerId: "good_colleague", text: "Kvikk Lunsj og påskekrim.", duration: 3500, delay: 0 },
+    { speakerId: "$OTHER", text: "Is that... a Norwegian Easter thing?", duration: 3500, delay: 800 },
+    { speakerId: "good_colleague", text: "Det er tradisjon.", duration: 3000, delay: 600, animation: "bounce" },
+  ],
+  [
+    { speakerId: "good_colleague", text: "God påske.", duration: 2500, delay: 0, animation: "bounce" },
+    { speakerId: "$OTHER", text: "Happy Easter to you too!", duration: 3000, delay: 700, animation: "bounce" },
+  ],
+];
+
 // --- Resolver ---
 
 function resolveScript(
@@ -308,6 +372,14 @@ export function pickConversation(
     if (pairPool && Math.random() < 0.4) {
       return pickFrom(pairPool, idA, idB);
     }
+  }
+
+  // Try Easter scripts (25% chance during Easter season)
+  if (context?.easterTheme?.active && Math.random() < 0.25) {
+    if (hasGC) {
+      return pickFrom(EASTER_GC_SCRIPTS, idA, idB);
+    }
+    return pickFrom(EASTER_SCRIPTS, idA, idB);
   }
 
   // Try weather-aware scripts (25% chance when weather active)

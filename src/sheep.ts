@@ -1,5 +1,6 @@
 import { SpriteSheet } from "./sprite";
 import { FriendPersonality, SheepAnimation, SheepState, WindowPlatform } from "./types";
+import type { EasterTheme } from "./easter-theme";
 
 const SPRITE_SIZE = 32;
 const SCALE = 3;
@@ -52,6 +53,7 @@ export class Sheep {
   private lastActivityTime: number = Date.now();
   private campfireSparks: Array<{ x: number; y: number; life: number }> = [];
   private nameTagAlpha: number = 0;
+  private easterTheme: EasterTheme | null = null;
 
   private sprites: Record<string, SpriteSheet>;
 
@@ -89,6 +91,10 @@ export class Sheep {
       sleep: new SpriteSheet("/assets/sprites/sheep-sleep.png", 32, 32, 2, 2),
       fall: new SpriteSheet("/assets/sprites/sheep-fall.png", 32, 32, 1, 1),
     };
+  }
+
+  setEasterTheme(easterTheme: EasterTheme | null) {
+    this.easterTheme = easterTheme;
   }
 
   get groundY(): number {
@@ -382,6 +388,9 @@ export class Sheep {
       case "idle_sighing":
         this.updateIdleSighing();
         break;
+      case "idle_egg_painting":
+        this.updateIdleEggPainting();
+        break;
       case "stampede":
         this.updateStampede(dt);
         break;
@@ -572,6 +581,12 @@ export class Sheep {
       return;
     }
 
+    // Easter egg painting chance during Easter season
+    if (this.easterTheme?.active && Math.random() < 0.15) {
+      this.setState("idle_egg_painting", 12000 + Math.random() * 8000);
+      return;
+    }
+
     const bw = this.getBoredWeights();
     const roll = Math.random();
     if (roll < bw.sleep) {
@@ -585,6 +600,12 @@ export class Sheep {
   }
 
   private transitionToPersonalityBored() {
+    // Easter egg painting chance during Easter season
+    if (this.easterTheme?.active && Math.random() < 0.15) {
+      this.setState("idle_egg_painting", 12000 + Math.random() * 8000);
+      return;
+    }
+
     const roll = Math.random();
     switch (this.personality) {
       case "chaotic":
@@ -707,6 +728,12 @@ export class Sheep {
     }
   }
 
+  private updateIdleEggPainting() {
+    if (this.stateTimer >= this.stateDuration) {
+      this.setState("idle", 2000 + Math.random() * 3000);
+    }
+  }
+
   private updateStampede(dt: number) {
     const dir = this.facingRight ? 1 : -1;
     const speed = ZOOM_SPEED * 1.5;
@@ -820,6 +847,7 @@ export class Sheep {
       case "idle_hearts": return "sit";
       case "idle_zooming": return "walk";
       case "idle_sighing": return "sit";
+      case "idle_egg_painting": return "sit";
       case "stampede": return "walk";
       case "trampoline": return "fall";
       case "stacked": return "sit";
@@ -1148,6 +1176,10 @@ export class Sheep {
       this.drawSighing(ctx, cx, top);
     }
 
+    if (this.state === "idle_egg_painting") {
+      this.drawEggPainting(ctx);
+    }
+
     if (this.state === "stampede") {
       // Panic exclamation marks
       ctx.save();
@@ -1378,6 +1410,72 @@ export class Sheep {
       ctx.arc(px, py, 3, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  private drawEggPainting(ctx: CanvasRenderingContext2D) {
+    const eggX = this.facingRight
+      ? this.x + this.displaySize + 8
+      : this.x - 22;
+    const baseY = this.groundY + this.displaySize - 4;
+    const progress = Math.min(1, this.stateTimer / (this.stateDuration - 2000)); // 0..1
+
+    ctx.save();
+
+    // Egg (white oval)
+    ctx.fillStyle = "#FFFFF0";
+    ctx.beginPath();
+    ctx.ellipse(eggX + 7, baseY - 4, 6, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#DDD";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    // Progressive paint stripes (appear as progress increases)
+    const stripeColors = ["#FFB6C1", "#B0E2AC", "#C8B4E6", "#FFFACD"];
+    for (let i = 0; i < 4; i++) {
+      if (progress > (i + 1) / 5) {
+        ctx.fillStyle = stripeColors[i];
+        const sy = baseY - 10 + i * 4;
+        ctx.fillRect(eggX + 2, sy, 10, 2);
+      }
+    }
+
+    // Tiny dots decoration (appear later)
+    if (progress > 0.7) {
+      ctx.fillStyle = "#FFD700";
+      ctx.beginPath();
+      ctx.arc(eggX + 5, baseY - 6, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(eggX + 9, baseY - 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Brush (brown line near egg)
+    const brushBob = Math.sin(this.stateTimer / 200) * 2;
+    ctx.strokeStyle = "#8B4513";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(eggX + 14, baseY - 8 + brushBob);
+    ctx.lineTo(eggX + 20, baseY - 16 + brushBob);
+    ctx.stroke();
+    // Brush tip
+    ctx.fillStyle = stripeColors[Math.floor(this.stateTimer / 800) % stripeColors.length];
+    ctx.beginPath();
+    ctx.arc(eggX + 14, baseY - 8 + brushBob, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sparkle when done (last 2s)
+    if (this.stateTimer > this.stateDuration - 2000) {
+      const sparkAlpha = Math.sin(this.stateTimer / 100) * 0.5 + 0.5;
+      ctx.globalAlpha = sparkAlpha;
+      ctx.fillStyle = "#FFD700";
+      ctx.font = "12px serif";
+      ctx.fillText("\u2728", eggX - 2, baseY - 16);
+      ctx.fillText("\u2728", eggX + 12, baseY - 14);
+    }
+
     ctx.restore();
   }
 }

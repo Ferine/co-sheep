@@ -27,7 +27,8 @@ export type SheepState =
   | "idle_sighing"
   | "stampede"
   | "trampoline"
-  | "stacked";
+  | "stacked"
+  | "idle_egg_painting";
 
 export type SheepAnimation = "bounce" | "spin" | "backflip" | "headshake" | "zoom" | "vibrate";
 

@@ -592,6 +592,97 @@ const ACCESSORIES: AccessoryDef[] = [
       ctx.restore();
     },
   },
+  {
+    id: "bunny_ears",
+    name: "Bunny Ears",
+    category: "head",
+    draw: (ctx, x, y, size, facingRight, _state) => {
+      const s = size / 32;
+      const headX = facingRight ? x + size * 0.65 : x + size * 0.15;
+      const headY = y + size * 0.15;
+
+      ctx.save();
+      // Two ears splayed outward
+      for (const side of [-1, 1]) {
+        const earX = headX + side * 3.5 * s;
+        const earTipY = headY - 12 * s;
+        const earBaseY = headY;
+        const earCX = earX + side * 1.5 * s;
+
+        // Outer ear (white)
+        ctx.fillStyle = "#FFFFFF";
+        ctx.beginPath();
+        ctx.ellipse(earCX, (earTipY + earBaseY) / 2, 2.5 * s, 6.5 * s, side * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner ear (pink)
+        ctx.fillStyle = "#FFB6C1";
+        ctx.beginPath();
+        ctx.ellipse(earCX, (earTipY + earBaseY) / 2 + 0.5 * s, 1.5 * s, 5 * s, side * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    },
+  },
+  {
+    id: "easter_basket",
+    name: "Easter Basket",
+    category: "neck",
+    draw: (ctx, x, y, size, facingRight, state) => {
+      // Only show in calm states
+      const calmStates = ["idle", "sit", "idle_sleep", "idle_campfire", "idle_counting", "idle_egg_painting", "sleep"];
+      if (!calmStates.includes(state)) return;
+
+      const s = size / 32;
+      const bx = facingRight ? x + size * 0.85 : x - 4 * s;
+      const by = y + size * 0.55;
+
+      ctx.save();
+      // Basket body (brown woven look)
+      ctx.fillStyle = "#8B6914";
+      ctx.beginPath();
+      ctx.moveTo(bx - 4 * s, by);
+      ctx.lineTo(bx + 4 * s, by);
+      ctx.lineTo(bx + 3 * s, by + 5 * s);
+      ctx.lineTo(bx - 3 * s, by + 5 * s);
+      ctx.closePath();
+      ctx.fill();
+
+      // Weave lines
+      ctx.strokeStyle = "#A0781E";
+      ctx.lineWidth = 0.5 * s;
+      ctx.beginPath();
+      ctx.moveTo(bx - 3.5 * s, by + 2 * s);
+      ctx.lineTo(bx + 3.5 * s, by + 2 * s);
+      ctx.moveTo(bx - 3.2 * s, by + 3.5 * s);
+      ctx.lineTo(bx + 3.2 * s, by + 3.5 * s);
+      ctx.stroke();
+
+      // Handle (arc)
+      ctx.strokeStyle = "#8B6914";
+      ctx.lineWidth = 1 * s;
+      ctx.beginPath();
+      ctx.arc(bx, by - 1 * s, 3.5 * s, Math.PI, 0);
+      ctx.stroke();
+
+      // Green grass
+      ctx.fillStyle = "#7CFC00";
+      for (let i = 0; i < 5; i++) {
+        const gx = bx - 3 * s + i * 1.5 * s;
+        ctx.fillRect(gx, by - 1 * s, 0.8 * s, 2 * s);
+      }
+
+      // Tiny eggs in basket
+      const eggColors = ["#FFB6C1", "#B0E2AC", "#C8B4E6"];
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = eggColors[i];
+        ctx.beginPath();
+        ctx.ellipse(bx - 2 * s + i * 2 * s, by + 0.5 * s, 1 * s, 1.5 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    },
+  },
 ];
 
 export function getAccessoryDefs(): AccessoryDef[] {
