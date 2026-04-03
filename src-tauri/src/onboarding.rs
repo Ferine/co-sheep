@@ -42,6 +42,8 @@ pub struct SheepConfig {
     pub friends: Vec<FriendDef>,
     #[serde(default = "default_break_reminders")]
     pub break_reminders: bool,
+    #[serde(default = "default_easter_mode")]
+    pub easter_mode: String,
     #[serde(default)]
     pub weather_location: String,
     #[serde(default)]
@@ -68,6 +70,10 @@ fn default_break_reminders() -> bool {
     true
 }
 
+fn default_easter_mode() -> String {
+    "auto".to_string()
+}
+
 impl Default for SheepConfig {
     fn default() -> Self {
         Self {
@@ -81,6 +87,7 @@ impl Default for SheepConfig {
             lmstudio_model: "qwen3.5-9b".to_string(),
             friends: Vec::new(),
             break_reminders: true,
+            easter_mode: "auto".to_string(),
             weather_location: String::new(),
             accessories: Vec::new(),
         }
@@ -183,4 +190,10 @@ pub fn get_weather_location() -> String {
     load_config()
         .map(|c| c.weather_location)
         .unwrap_or_default()
+}
+
+pub fn get_easter_mode() -> String {
+    load_config()
+        .map(|c| c.easter_mode)
+        .unwrap_or_else(default_easter_mode)
 }

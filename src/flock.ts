@@ -5,9 +5,9 @@ import { pickConversation, ConversationContext } from "./conversations";
 import { NightAmbience } from "./night-ambience";
 import { WeatherEffects } from "./weather-effects";
 import { getPersonalityQuips, getPersonalityAnimBias } from "./friend-personalities";
-import { createCompositeOverlay } from "./accessories";
-import { GroupActivity, canStartGroupActivity, createGroupActivity, pickActivityType, updateGroupActivity } from "./group-activities";
-import { EasterTheme } from "./easter-theme";
+import { createCompositeOverlay, drawEasterBasket } from "./accessories";
+import { EasterHuntSummary, GroupActivity, canStartGroupActivity, createGroupActivity, pickActivityType, updateGroupActivity } from "./group-activities";
+import { EasterStatsSnapshot, EasterTheme } from "./easter-theme";
 import { invoke } from "@tauri-apps/api/core";
 
 const GOOD_COLLEAGUE_QUIPS = [
@@ -32,6 +32,16 @@ const GOOD_COLLEAGUE_QUIPS = [
 ];
 
 const DISPLAY_SIZE = 96; // 32 * 3
+const EASTER_IDLE_QUIPS = [
+  "I can smell fresh paint.",
+  "Spring logistics are underway.",
+  "This meadow is suspiciously egg-shaped.",
+];
+const EASTER_POST_HUNT_QUIPS = [
+  "I should've hidden them better.",
+  "We absolutely crushed that hunt.",
+  "I am still thinking about the golden egg.",
+];
 
 interface PendingReaction {
   text: string;
@@ -195,6 +205,7 @@ export class Flock {
     // Create main sheep
     this.main = new Sheep(screenWidth, screenHeight, "main");
     this.main.setEasterTheme(this.easterTheme);
+    this.attachSeasonalOverlay(this.main);
     this.mainBubble = new SpeechBubble(true);
 
     // Wire AI commentary animations to main sheep
@@ -218,6 +229,7 @@ export class Flock {
     const startX = Math.random() * (this.screenWidth - DISPLAY_SIZE * 2) + DISPLAY_SIZE / 2;
     const sheep = new Sheep(this.screenWidth, this.screenHeight, "good_colleague", tint, startX);
     sheep.setEasterTheme(this.easterTheme);
+    this.attachSeasonalOverlay(sheep);
     sheep.name = "Good Colleague";
     sheep.drawOverlay = drawGoodColleagueOverlay;
 
@@ -242,6 +254,7 @@ export class Flock {
     const startX = Math.random() * (this.screenWidth - DISPLAY_SIZE * 2) + DISPLAY_SIZE / 2;
     const sheep = new Sheep(this.screenWidth, this.screenHeight, config.id, tint, startX, scale);
     sheep.setEasterTheme(this.easterTheme);
+    this.attachSeasonalOverlay(sheep);
     sheep.name = config.name;
 
     const personality: FriendPersonality = config.personality ?? "wholesome";
@@ -452,6 +465,17 @@ export class Flock {
     this.easterTheme.updateScreenSize(w, h);
   }
 
+  setEasterMode(mode: "auto" | "on" | "off") {
+    this.easterTheme.setModeOverride(mode);
+    if (mode === "off" && this.groupActivity?.type === "easter_egg_hunt") {
+      this.clearGroupActivity(true);
+    }
+  }
+
+  applyEasterStats(stats: EasterStatsSnapshot | null) {
+    this.easterTheme.applyStats(stats);
+  }
+
   setWeatherCondition(c: string | null) {
     const prev = this.weatherEffects.condition;
     this.currentWeatherCondition = c;
@@ -538,6 +562,9 @@ export class Flock {
 
     // Easter theme background (flowers) — behind sheep
     this.easterTheme.drawBackground(ctx, this.screenWidth, this.screenHeight);
+
+    // Easter eggs and grass detail — beneath the flock
+    this.easterTheme.drawMidground(ctx, this.screenWidth, this.screenHeight);
 
     // Main sheep first (behind friends)
     this.main.draw(ctx);
@@ -749,7 +776,18 @@ export class Flock {
     if (!this.groupActivity) return;
 
     if (this.groupActivity.type === "easter_egg_hunt") {
+      const huntSummary = this.groupActivity.huntSummary;
+      if (huntSummary && huntSummary.finders.some((finder) => finder.eggsFound > 0)) {
+        this.recordEasterHunt(huntSummary);
+      }
       this.easterTheme.resetEggs();
+    }
+
+    if (!cancelledEarly) {
+      invoke("record_group_activity", {
+        participants: this.groupActivity.participants,
+        activityType: this.groupActivity.type,
+      }).catch(() => {});
     }
 
     // Release participants from activity-driven states so they don't keep walking toward stale targets
@@ -847,6 +885,8 @@ export class Flock {
           weather: this.currentWeatherCondition,
           hour: new Date().getHours(),
           easterTheme: this.easterTheme,
+          recentEasterHunt: this.easterTheme.hasRecentHuntBuzz(),
+          eggPaintingActive: a.sheep.state === "idle_egg_painting" || b.sheep.state === "idle_egg_painting",
         };
         const script = pickConversation(a.id, b.id, ctx);
         if (!script) continue;
@@ -958,7 +998,13 @@ export class Flock {
       const s = entry.sheep.state;
       // Only blurt quips during calm states
       if (s === "idle" || s === "walk" || s === "sit") {
-        const quip = entry.quips[Math.floor(Math.random() * entry.quips.length)];
+        let pool = entry.quips;
+        if (this.easterTheme.active && this.easterTheme.hasRecentHuntBuzz()) {
+          pool = EASTER_POST_HUNT_QUIPS;
+        } else if (this.easterTheme.active && Math.random() < 0.35) {
+          pool = EASTER_IDLE_QUIPS;
+        }
+        const quip = pool[Math.floor(Math.random() * pool.length)];
         entry.bubble.show(quip, 5000);
         // Personality-biased animation to accompany the quip
         const anims = getPersonalityAnimBias(entry.personality);
@@ -970,6 +1016,43 @@ export class Flock {
       // Schedule next quip 45-90s from now
       entry.nextQuipTime = now + 45000 + Math.random() * 45000;
     }
+  }
+
+  private attachSeasonalOverlay(sheep: Sheep) {
+    sheep.seasonalOverlay = (ctx, x, y, size, facingRight, state) => {
+      if (!this.easterTheme.shouldShowBasket(sheep.id)) return;
+      const eggCount = Math.max(1, this.easterTheme.getBasketEggCount(sheep.id));
+      drawEasterBasket(ctx, x, y, size, facingRight, state, {
+        eggCount,
+        allowMoving: true,
+      });
+    };
+  }
+
+  private recordEasterHunt(summary: EasterHuntSummary) {
+    const hunters = summary.finders.map((finder) => {
+      const sheep = this.getSheepById(finder.id)?.sheep;
+      return {
+        id: finder.id,
+        name: sheep?.name || finder.id,
+        eggsFound: finder.eggsFound,
+        goldenEggsFound: finder.goldenEggsFound,
+      };
+    });
+
+    invoke<EasterStatsSnapshot>("record_easter_hunt", {
+      result: {
+        totalEggs: summary.totalEggs,
+        durationMs: summary.durationMs,
+        allCollected: summary.allCollected,
+        paintedEggsUsed: summary.paintedEggsUsed,
+        hunters,
+      },
+    }).then((stats) => {
+      this.easterTheme.applyStats(stats);
+    }).catch((error) => {
+      console.error("[co-sheep] Failed to record Easter hunt:", error);
+    });
   }
 
   private triggerStampedeDialogue() {

@@ -9,6 +9,8 @@ export interface ConversationContext {
   weather?: string | null;
   hour?: number;
   easterTheme?: EasterTheme | null;
+  recentEasterHunt?: boolean;
+  eggPaintingActive?: boolean;
 }
 
 // $A and $B are placeholders resolved at pick time
@@ -320,6 +322,32 @@ const EASTER_GC_SCRIPTS: ScriptTemplate[] = [
   ],
 ];
 
+const EASTER_HUNT_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "$A", text: "I still can't believe you missed the golden egg.", duration: 4200, delay: 0 },
+    { speakerId: "$B", text: "I was busy carrying the team.", duration: 3400, delay: 700, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "My basket is still full.", duration: 3200, delay: 0 },
+    { speakerId: "$B", text: "That explains the smugness.", duration: 3400, delay: 700 },
+  ],
+  [
+    { speakerId: "$A", text: "Do we get medals for that hunt?", duration: 3200, delay: 0 },
+    { speakerId: "$B", text: "No. We get more eggs.", duration: 3000, delay: 700, animation: "bounce" },
+  ],
+];
+
+const EASTER_PAINTING_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "$A", text: "Hold still. This stripe needs emotional support.", duration: 4200, delay: 0 },
+    { speakerId: "$B", text: "You're talking to the egg again.", duration: 3200, delay: 700, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "I have paint on my hooves.", duration: 3200, delay: 0 },
+    { speakerId: "$B", text: "That means it's working.", duration: 2800, delay: 700, animation: "bounce" },
+  ],
+];
+
 // --- Resolver ---
 
 function resolveScript(
@@ -374,7 +402,28 @@ export function pickConversation(
     }
   }
 
-  // Try Easter scripts (25% chance during Easter season)
+  // Try Easter scripts with stronger bias around active seasonal moments.
+  if (context?.easterTheme?.active) {
+    const easterChance = context.recentEasterHunt
+      ? 0.8
+      : context.eggPaintingActive
+        ? 0.65
+        : 0.25;
+    if (Math.random() < easterChance) {
+      if (context.recentEasterHunt) {
+        return pickFrom(EASTER_HUNT_SCRIPTS, idA, idB);
+      }
+      if (context.eggPaintingActive) {
+        return pickFrom(EASTER_PAINTING_SCRIPTS, idA, idB);
+      }
+      if (hasGC) {
+        return pickFrom(EASTER_GC_SCRIPTS, idA, idB);
+      }
+      return pickFrom(EASTER_SCRIPTS, idA, idB);
+    }
+  }
+
+  // Try Easter scripts (baseline seasonal chance)
   if (context?.easterTheme?.active && Math.random() < 0.25) {
     if (hasGC) {
       return pickFrom(EASTER_GC_SCRIPTS, idA, idB);

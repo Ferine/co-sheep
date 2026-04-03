@@ -238,6 +238,16 @@
     </div>
 
     <div class="field">
+      <label>Easter Mode</label>
+      <select id="easter-mode">
+        <option value="auto">Auto (seasonal only)</option>
+        <option value="on">Always on</option>
+        <option value="off">Always off</option>
+      </select>
+      <div class="hint">Useful for testing the seasonal mode without waiting for the calendar.</div>
+    </div>
+
+    <div class="field">
       <label style="display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 14px; color: #eee; cursor: pointer;">
         <input id="break-reminders" type="checkbox" checked style="width: auto; cursor: pointer;" />
         Break Reminders
@@ -250,7 +260,7 @@
       <button class="save-btn" id="save-btn">Save</button>
     </div>
 
-    <div class="saved-msg" id="saved-msg">Settings saved! Changes take effect on next commentary cycle.</div>
+    <div class="saved-msg" id="saved-msg">Settings saved.</div>
 
     <script>
       const { invoke } = window.__TAURI__.core;
@@ -273,6 +283,7 @@
       const lmstudioEndpoint = document.getElementById('lmstudio-endpoint');
       const lmstudioModel = document.getElementById('lmstudio-model');
       const weatherLocationInput = document.getElementById('weather-location');
+      const easterModeSelect = document.getElementById('easter-mode');
       const breakRemindersCheckbox = document.getElementById('break-reminders');
 
       const descriptions = {
@@ -336,6 +347,7 @@
           lmstudioEndpoint: lmstudioEndpoint.value.trim() || 'http://localhost:1234',
           lmstudioModel: lmstudioModel.value.trim() || 'qwen3.5-9b',
           breakReminders: breakRemindersCheckbox.checked,
+          easterMode: easterModeSelect.value,
           weatherLocation: weatherLocationInput.value.trim(),
         });
         savedMsg.classList.add('visible');
@@ -357,6 +369,7 @@
           lmstudioEndpoint.value = settings.lmstudio_endpoint || 'http://localhost:1234';
           lmstudioModel.value = settings.lmstudio_model || 'qwen3.5-9b';
           weatherLocationInput.value = settings.weather_location || '';
+          easterModeSelect.value = settings.easter_mode || 'auto';
           breakRemindersCheckbox.checked = settings.break_reminders !== false;
           updateProviderUI();
         } catch (e) {

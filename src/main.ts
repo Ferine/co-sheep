@@ -6,6 +6,7 @@ import { InputBubble } from "./input-bubble";
 import { BreakReminder } from "./break-reminder";
 import { createCompositeOverlay } from "./accessories";
 import { FriendConfig } from "./types";
+import { EasterStatsSnapshot } from "./easter-theme";
 import "./styles.css";
 
 let flock: Flock;
@@ -62,14 +63,23 @@ async function init() {
       personality: string;
       break_reminders: boolean;
       accessories: string[];
+      easter_mode: "auto" | "on" | "off";
     }>("get_settings");
     personality = settings.personality || "snarky";
     breakReminder.setEnabled(settings.break_reminders);
+    flock.setEasterMode(settings.easter_mode || "auto");
     if (settings.accessories && settings.accessories.length > 0) {
       flock.main.drawOverlay = createCompositeOverlay(settings.accessories);
     }
   } catch (e) {
     console.log("[co-sheep] Failed to load settings:", e);
+  }
+
+  try {
+    const easterStats = await invoke<EasterStatsSnapshot>("get_easter_stats");
+    flock.applyEasterStats(easterStats);
+  } catch (e) {
+    console.log("[co-sheep] Failed to load Easter stats:", e);
   }
 
   // Load additional saved friends
@@ -279,6 +289,16 @@ async function init() {
 
   listen<string>("remove-friend", (event) => {
     flock.removeFriend(event.payload);
+  });
+
+  listen<{
+    personality: string;
+    break_reminders: boolean;
+    easter_mode: "auto" | "on" | "off";
+  }>("settings-changed", (event) => {
+    personality = event.payload.personality || "snarky";
+    breakReminder.setEnabled(event.payload.break_reminders);
+    flock.setEasterMode(event.payload.easter_mode || "auto");
   });
 
   // Capture moment event

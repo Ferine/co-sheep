@@ -8,6 +8,80 @@ export interface AccessoryDef {
   draw: DrawOverlay;
 }
 
+interface EasterBasketOptions {
+  eggCount?: number;
+  allowMoving?: boolean;
+}
+
+export function drawEasterBasket(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  facingRight: boolean,
+  state: SheepState,
+  options: EasterBasketOptions = {},
+) {
+  const calmStates = ["idle", "sit", "idle_sleep", "idle_campfire", "idle_counting", "idle_egg_painting", "sleep"];
+  const movingStates = ["walk", "bounce"];
+  if (!calmStates.includes(state) && !(options.allowMoving && movingStates.includes(state))) {
+    return;
+  }
+
+  const eggCount = Math.max(0, Math.min(5, Math.round(options.eggCount ?? 3)));
+  const s = size / 32;
+  const bx = facingRight ? x + size * 0.85 : x - 4 * s;
+  const by = y + size * 0.55;
+
+  ctx.save();
+  ctx.fillStyle = "#8B6914";
+  ctx.beginPath();
+  ctx.moveTo(bx - 4 * s, by);
+  ctx.lineTo(bx + 4 * s, by);
+  ctx.lineTo(bx + 3 * s, by + 5 * s);
+  ctx.lineTo(bx - 3 * s, by + 5 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "#A0781E";
+  ctx.lineWidth = 0.5 * s;
+  ctx.beginPath();
+  ctx.moveTo(bx - 3.5 * s, by + 2 * s);
+  ctx.lineTo(bx + 3.5 * s, by + 2 * s);
+  ctx.moveTo(bx - 3.2 * s, by + 3.5 * s);
+  ctx.lineTo(bx + 3.2 * s, by + 3.5 * s);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#8B6914";
+  ctx.lineWidth = 1 * s;
+  ctx.beginPath();
+  ctx.arc(bx, by - 1 * s, 3.5 * s, Math.PI, 0);
+  ctx.stroke();
+
+  ctx.fillStyle = "#7CFC00";
+  for (let i = 0; i < 5; i++) {
+    const gx = bx - 3 * s + i * 1.5 * s;
+    ctx.fillRect(gx, by - 1 * s, 0.8 * s, 2 * s);
+  }
+
+  const eggColors = ["#FFB6C1", "#B0E2AC", "#C8B4E6", "#FFEFAA", "#FFE07B"];
+  for (let i = 0; i < eggCount; i++) {
+    ctx.fillStyle = eggColors[i % eggColors.length];
+    ctx.beginPath();
+    ctx.ellipse(
+      bx - 2 * s + i * 1.8 * s,
+      by + 0.5 * s - (i % 2) * 0.5 * s,
+      1 * s,
+      1.5 * s,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 const ACCESSORIES: AccessoryDef[] = [
   {
     id: "party_hat",
@@ -628,60 +702,7 @@ const ACCESSORIES: AccessoryDef[] = [
     id: "easter_basket",
     name: "Easter Basket",
     category: "neck",
-    draw: (ctx, x, y, size, facingRight, state) => {
-      // Only show in calm states
-      const calmStates = ["idle", "sit", "idle_sleep", "idle_campfire", "idle_counting", "idle_egg_painting", "sleep"];
-      if (!calmStates.includes(state)) return;
-
-      const s = size / 32;
-      const bx = facingRight ? x + size * 0.85 : x - 4 * s;
-      const by = y + size * 0.55;
-
-      ctx.save();
-      // Basket body (brown woven look)
-      ctx.fillStyle = "#8B6914";
-      ctx.beginPath();
-      ctx.moveTo(bx - 4 * s, by);
-      ctx.lineTo(bx + 4 * s, by);
-      ctx.lineTo(bx + 3 * s, by + 5 * s);
-      ctx.lineTo(bx - 3 * s, by + 5 * s);
-      ctx.closePath();
-      ctx.fill();
-
-      // Weave lines
-      ctx.strokeStyle = "#A0781E";
-      ctx.lineWidth = 0.5 * s;
-      ctx.beginPath();
-      ctx.moveTo(bx - 3.5 * s, by + 2 * s);
-      ctx.lineTo(bx + 3.5 * s, by + 2 * s);
-      ctx.moveTo(bx - 3.2 * s, by + 3.5 * s);
-      ctx.lineTo(bx + 3.2 * s, by + 3.5 * s);
-      ctx.stroke();
-
-      // Handle (arc)
-      ctx.strokeStyle = "#8B6914";
-      ctx.lineWidth = 1 * s;
-      ctx.beginPath();
-      ctx.arc(bx, by - 1 * s, 3.5 * s, Math.PI, 0);
-      ctx.stroke();
-
-      // Green grass
-      ctx.fillStyle = "#7CFC00";
-      for (let i = 0; i < 5; i++) {
-        const gx = bx - 3 * s + i * 1.5 * s;
-        ctx.fillRect(gx, by - 1 * s, 0.8 * s, 2 * s);
-      }
-
-      // Tiny eggs in basket
-      const eggColors = ["#FFB6C1", "#B0E2AC", "#C8B4E6"];
-      for (let i = 0; i < 3; i++) {
-        ctx.fillStyle = eggColors[i];
-        ctx.beginPath();
-        ctx.ellipse(bx - 2 * s + i * 2 * s, by + 0.5 * s, 1 * s, 1.5 * s, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    },
+    draw: (ctx, x, y, size, facingRight, state) => drawEasterBasket(ctx, x, y, size, facingRight, state),
   },
 ];
 

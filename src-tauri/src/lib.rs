@@ -1,5 +1,6 @@
 mod capture;
 mod cursor;
+mod easter_memory;
 mod friend_memory;
 mod memory;
 mod onboarding;
@@ -127,6 +128,7 @@ async fn get_settings() -> Result<onboarding::SheepConfig, String> {
 
 #[tauri::command]
 async fn save_settings(
+    app: tauri::AppHandle,
     name: String,
     personality: String,
     interval_secs: u64,
@@ -136,6 +138,7 @@ async fn save_settings(
     lmstudio_endpoint: String,
     lmstudio_model: String,
     break_reminders: bool,
+    easter_mode: String,
     weather_location: String,
 ) -> Result<(), String> {
     eprintln!(
@@ -156,10 +159,26 @@ async fn save_settings(
         lmstudio_model,
         friends: existing.friends,
         break_reminders,
+        easter_mode,
         weather_location,
         accessories: existing.accessories,
     };
-    onboarding::write_config(&config).map_err(|e| e.to_string())
+    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    app.emit(
+        "settings-changed",
+        serde_json::json!({
+            "name": config.name,
+            "personality": config.personality,
+            "interval_secs": config.interval_secs,
+            "language": config.language,
+            "ai_provider": config.ai_provider,
+            "break_reminders": config.break_reminders,
+            "easter_mode": config.easter_mode,
+            "weather_location": config.weather_location,
+        }),
+    )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -175,7 +194,7 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("settings.html".into()),
     )
     .title("co-sheep Settings")
-    .inner_size(420.0, 520.0)
+    .inner_size(420.0, 600.0)
     .center()
     .decorations(true)
     .always_on_top(true)
@@ -463,6 +482,18 @@ async fn get_friend_moods() -> Result<std::collections::HashMap<String, String>,
 }
 
 #[tauri::command]
+async fn get_easter_stats() -> Result<easter_memory::EasterStats, String> {
+    Ok(easter_memory::get_stats())
+}
+
+#[tauri::command]
+async fn record_easter_hunt(
+    result: easter_memory::EasterHuntResult,
+) -> Result<easter_memory::EasterStats, String> {
+    Ok(easter_memory::record_hunt(result))
+}
+
+#[tauri::command]
 async fn friend_ai_chat(
     friend_a_name: String,
     friend_a_personality: String,
@@ -532,6 +563,8 @@ pub fn run() {
             get_friend_memory,
             get_all_relationships,
             get_friend_moods,
+            get_easter_stats,
+            record_easter_hunt,
             open_friend_memory_window,
         ])
         .setup(|app| {

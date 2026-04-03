@@ -33,6 +33,7 @@ export class Sheep {
   facingRight: boolean = true;
   walkTarget: number | null = null;
   drawOverlay: DrawOverlay | null = null;
+  seasonalOverlay: DrawOverlay | null = null;
 
   // Stacking
   stackedOn: Sheep | null = null;
@@ -54,6 +55,7 @@ export class Sheep {
   private campfireSparks: Array<{ x: number; y: number; life: number }> = [];
   private nameTagAlpha: number = 0;
   private easterTheme: EasterTheme | null = null;
+  private eggPaintingRegistered = false;
 
   private sprites: Record<string, SpriteSheet>;
 
@@ -124,7 +126,8 @@ export class Sheep {
       this.state === "idle_judging" ||
       this.state === "idle_hearts" ||
       this.state === "idle_zooming" ||
-      this.state === "idle_sighing"
+      this.state === "idle_sighing" ||
+      this.state === "idle_egg_painting"
     ) {
       this.setState("idle", 1000 + Math.random() * 2000);
     }
@@ -416,6 +419,11 @@ export class Sheep {
   }
 
   private setState(newState: SheepState, duration: number = 0) {
+    if (newState === "idle_egg_painting") {
+      this.eggPaintingRegistered = false;
+    } else if (this.state === "idle_egg_painting") {
+      this.eggPaintingRegistered = false;
+    }
     this.state = newState;
     this.stateTimer = 0;
     this.stateDuration = duration;
@@ -729,6 +737,10 @@ export class Sheep {
   }
 
   private updateIdleEggPainting() {
+    if (!this.eggPaintingRegistered && this.stateDuration > 2000 && this.stateTimer >= this.stateDuration - 1800) {
+      this.easterTheme?.registerPaintedEgg(this.id, this.name);
+      this.eggPaintingRegistered = true;
+    }
     if (this.stateTimer >= this.stateDuration) {
       this.setState("idle", 2000 + Math.random() * 3000);
     }
@@ -1062,6 +1074,9 @@ export class Sheep {
     // Draw character-specific overlay (accessories etc.)
     if (this.drawOverlay) {
       this.drawOverlay(ctx, this.x, this.y, this.displaySize, this.facingRight, this.state);
+    }
+    if (this.seasonalOverlay) {
+      this.seasonalOverlay(ctx, this.x, this.y, this.displaySize, this.facingRight, this.state);
     }
 
     // Name tag for non-main sheep during calm states

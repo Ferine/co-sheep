@@ -4,10 +4,28 @@ import type { EasterTheme } from "./easter-theme";
 
 export type GroupActivityType = "campfire_circle" | "follow_leader" | "sync_bounce" | "huddle" | "easter_egg_hunt";
 
+export interface EasterHuntFinder {
+  eggsFound: number;
+  goldenEggsFound: number;
+}
+
+export interface EasterHuntSummary {
+  totalEggs: number;
+  durationMs: number;
+  allCollected: boolean;
+  paintedEggsUsed: number;
+  winnerId?: string;
+  finders: Array<{
+    id: string;
+    eggsFound: number;
+    goldenEggsFound: number;
+  }>;
+}
+
 export interface GroupActivity {
   type: GroupActivityType;
   participants: string[];
-  phase: "gathering" | "performing" | "dispersing";
+  phase: "gathering" | "performing" | "celebrating" | "dispersing";
   timer: number;
   duration: number;
   centerX: number;
@@ -17,9 +35,12 @@ export interface GroupActivity {
   eggAssignments?: Map<string, number>; // participant id → egg index
   collectedEggs?: Set<number>;
   eggReactionTimer?: number;
+  eggFinders?: Map<string, EasterHuntFinder>;
+  huntSummary?: EasterHuntSummary;
 }
 
 const DISPLAY_SIZE = 96;
+const EGG_COLLECTION_RADIUS = DISPLAY_SIZE * 0.35;
 
 const EGG_HUNT_QUIPS = [
   "Found one!",
@@ -36,6 +57,18 @@ const EGG_HUNT_PERSONALITY_QUIPS: Record<string, string[]> = {
   "passive-aggressive": ["Oh, I found one. How... delightful.", "I suppose someone had to find it.", "How nice for me."],
   good_colleague: ["Fint egg, ja", "Påskeegg!", "Nå snakker vi"],
 };
+
+const EGG_HUNT_VICTORY_LINES = [
+  "All eggs found!",
+  "Spring sweep complete!",
+  "The meadow has been cleared!",
+];
+
+const EGG_HUNT_WINNER_LINES = [
+  "I carried this hunt.",
+  "You're welcome, everyone.",
+  "I deserve the golden grass.",
+];
 
 /** Check if enough sheep are calm and near each other to start a group activity */
 export function canStartGroupActivity(
@@ -86,6 +119,7 @@ export function createGroupActivity(
     eggAssignments: type === "easter_egg_hunt" ? new Map() : undefined,
     collectedEggs: type === "easter_egg_hunt" ? new Set() : undefined,
     eggReactionTimer: type === "easter_egg_hunt" ? 0 : undefined,
+    eggFinders: type === "easter_egg_hunt" ? new Map() : undefined,
   };
 }
 
@@ -108,9 +142,11 @@ export function updateGroupActivity(
 
   switch (activity.phase) {
     case "gathering":
-      return updateGathering(activity, dt, getSheep);
+      return updateGathering(activity, dt, getSheep, easterTheme);
     case "performing":
       return updatePerforming(activity, dt, getSheep, easterTheme);
+    case "celebrating":
+      return updateCelebrating(activity, dt, getSheep, easterTheme);
     case "dispersing":
       return updateDispersing(activity);
   }
@@ -120,6 +156,7 @@ function updateGathering(
   activity: GroupActivity,
   _dt: number,
   getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble } | null,
+  easterTheme?: EasterTheme | null,
 ): boolean {
   let allGathered = true;
 
@@ -142,6 +179,17 @@ function updateGathering(
   if (allGathered || activity.timer > 8000) {
     activity.phase = "performing";
     activity.timer = 0;
+
+    if (activity.type === "easter_egg_hunt" && easterTheme) {
+      easterTheme.prepareHunt(activity.participants);
+      activity.huntSummary = {
+        totalEggs: easterTheme.getEggPositions().length,
+        durationMs: 0,
+        allCollected: false,
+        paintedEggsUsed: easterTheme.getPaintedEggsUsedCount(),
+        finders: [],
+      };
+    }
 
     // Announce the activity
     if (activity.type === "huddle") {
@@ -242,29 +290,21 @@ function updatePerforming(
     }
 
     case "easter_egg_hunt": {
-      updateEasterEggHunt(activity, dt, getSheep, easterTheme);
+      const finished = updateEasterEggHunt(activity, dt, getSheep, easterTheme);
+      if (finished) {
+        startHuntCelebration(activity, getSheep, easterTheme);
+        return true;
+      }
       break;
     }
   }
 
   if (activity.timer >= activity.duration) {
-    activity.phase = "dispersing";
-    activity.timer = 0;
-
-    // Reset eggs for next hunt
-    if (activity.type === "easter_egg_hunt" && easterTheme) {
-      easterTheme.resetEggs();
+    if (activity.type === "easter_egg_hunt") {
+      finalizeHuntSummary(activity, easterTheme, false);
+      easterTheme?.finishHunt();
     }
-
-    // Release participants from forced states
-    for (const id of activity.participants) {
-      const entry = getSheep(id);
-      if (entry) {
-        // Set random walk targets outward
-        const dir = Math.random() > 0.5 ? 1 : -1;
-        entry.sheep.walkTarget = entry.sheep.x + dir * (DISPLAY_SIZE * 2 + Math.random() * DISPLAY_SIZE * 3);
-      }
-    }
+    startDispersing(activity, getSheep);
   }
 
   // Call campfire update for the leader during campfire_circle
@@ -278,13 +318,45 @@ function updatePerforming(
   return true;
 }
 
+function updateCelebrating(
+  activity: GroupActivity,
+  dt: number,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+  easterTheme?: EasterTheme | null,
+): boolean {
+  if (activity.type !== "easter_egg_hunt") {
+    startDispersing(activity, getSheep);
+    return true;
+  }
+
+  if (activity.eggReactionTimer !== undefined && activity.eggReactionTimer > 0) {
+    activity.eggReactionTimer -= dt;
+    if (activity.eggReactionTimer <= 0) {
+      const summary = finalizeHuntSummary(activity, easterTheme, true);
+      if (summary?.winnerId) {
+        const winner = getSheep(summary.winnerId);
+        if (winner && !winner.bubble.visible) {
+          winner.bubble.show(EGG_HUNT_WINNER_LINES[Math.floor(Math.random() * EGG_HUNT_WINNER_LINES.length)], 2400);
+        }
+      }
+      activity.eggReactionTimer = 0;
+    }
+  }
+
+  if (activity.timer >= 2200) {
+    easterTheme?.finishHunt();
+    startDispersing(activity, getSheep);
+  }
+  return true;
+}
+
 function updateEasterEggHunt(
   activity: GroupActivity,
   _dt: number,
   getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
   easterTheme?: EasterTheme | null,
-) {
-  if (!easterTheme || !activity.eggAssignments || !activity.collectedEggs) return;
+) : boolean {
+  if (!easterTheme || !activity.eggAssignments || !activity.collectedEggs) return false;
 
   const eggs = easterTheme.getEggPositions();
   const uncollected = eggs.map((e, i) => ({ ...e, index: i })).filter((e) => !e.found && !activity.collectedEggs!.has(e.index));
@@ -339,10 +411,14 @@ function updateEasterEggHunt(
     if (!egg) continue;
 
     // Check if reached the egg (before setting walk target so we don't overshoot)
-    if (Math.abs(entry.sheep.x - egg.x) < DISPLAY_SIZE) {
+    if (Math.abs(entry.sheep.x - egg.x) < EGG_COLLECTION_RADIUS) {
       activity.collectedEggs!.add(targetIdx);
       activity.eggAssignments.delete(id);
-      easterTheme.collectEgg(targetIdx);
+      easterTheme.collectEgg(targetIdx, id);
+      const finder = activity.eggFinders?.get(id) ?? { eggsFound: 0, goldenEggsFound: 0 };
+      finder.eggsFound += 1;
+      if (egg.golden) finder.goldenEggsFound += 1;
+      activity.eggFinders?.set(id, finder);
 
       // Show reaction
       entry.sheep.playAnimation("bounce");
@@ -364,9 +440,82 @@ function updateEasterEggHunt(
       (entry.sheep as any).stateDuration = 15000; // long enough to reach the egg
     }
   }
+
+  return activity.collectedEggs.size >= eggs.length && eggs.length > 0;
 }
 
 function updateDispersing(activity: GroupActivity): boolean {
   // Dispersal lasts 3s then activity ends
   return activity.timer < 3000;
+}
+
+function startDispersing(
+  activity: GroupActivity,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+) {
+  activity.phase = "dispersing";
+  activity.timer = 0;
+
+  for (const id of activity.participants) {
+    const entry = getSheep(id);
+    if (entry) {
+      const dir = Math.random() > 0.5 ? 1 : -1;
+      entry.sheep.walkTarget = entry.sheep.x + dir * (DISPLAY_SIZE * 2 + Math.random() * DISPLAY_SIZE * 3);
+    }
+  }
+}
+
+function startHuntCelebration(
+  activity: GroupActivity,
+  getSheep: (id: string) => { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null,
+  easterTheme?: EasterTheme | null,
+) {
+  const summary = finalizeHuntSummary(activity, easterTheme, true);
+  activity.phase = "celebrating";
+  activity.timer = 0;
+  activity.eggReactionTimer = 850;
+
+  const speakerId = summary?.winnerId ?? activity.participants[0];
+  const speaker = speakerId ? getSheep(speakerId) : null;
+  if (speaker) {
+    speaker.bubble.show(EGG_HUNT_VICTORY_LINES[Math.floor(Math.random() * EGG_HUNT_VICTORY_LINES.length)], 2200);
+  }
+
+  for (const id of activity.participants) {
+    const entry = getSheep(id);
+    if (entry) {
+      entry.sheep.playAnimation("bounce");
+    }
+  }
+}
+
+function finalizeHuntSummary(
+  activity: GroupActivity,
+  easterTheme?: EasterTheme | null,
+  allCollected: boolean = false,
+): EasterHuntSummary | undefined {
+  if (activity.type !== "easter_egg_hunt") return undefined;
+
+  const finders = activity.participants.map((id) => {
+    const stats = activity.eggFinders?.get(id);
+    return {
+      id,
+      eggsFound: stats?.eggsFound ?? 0,
+      goldenEggsFound: stats?.goldenEggsFound ?? 0,
+    };
+  });
+  finders.sort((a, b) => (
+    b.eggsFound - a.eggsFound ||
+    b.goldenEggsFound - a.goldenEggsFound
+  ));
+
+  activity.huntSummary = {
+    totalEggs: activity.huntSummary?.totalEggs ?? easterTheme?.getEggPositions().length ?? activity.collectedEggs?.size ?? 0,
+    durationMs: activity.timer,
+    allCollected,
+    paintedEggsUsed: activity.huntSummary?.paintedEggsUsed ?? easterTheme?.getPaintedEggsUsedCount() ?? 0,
+    winnerId: finders[0] && finders[0].eggsFound > 0 ? finders[0].id : undefined,
+    finders,
+  };
+  return activity.huntSummary;
 }
