@@ -7,6 +7,7 @@ use std::time::Instant;
 pub struct WeatherInfo {
     pub condition: String,
     pub description: String,
+    pub temp_c: Option<f64>,
 }
 
 struct WeatherCache {
@@ -95,6 +96,7 @@ async fn fetch_weather(location: &str) -> Result<WeatherInfo, Box<dyn std::error
             "{}, {}C (feels like {}C), {}% humidity",
             desc_text, c.temp_c, c.feels_like_c, c.humidity
         ),
+        temp_c: c.temp_c.parse().ok(),
     })
 }
 
@@ -139,10 +141,9 @@ pub async fn get_weather_context() -> String {
 }
 
 /// Maps weather description to a simplified key for frontend effects
-pub async fn get_weather_condition() -> Option<String> {
-    let info = get_weather().await?;
-    let desc = info.condition.to_lowercase();
-    let code = if desc.contains("rain") || desc.contains("drizzle") || desc.contains("shower") {
+fn simplify_condition(desc: &str) -> &'static str {
+    let desc = desc.to_lowercase();
+    if desc.contains("rain") || desc.contains("drizzle") || desc.contains("shower") {
         "rain"
     } else if desc.contains("snow") || desc.contains("blizzard") || desc.contains("sleet") || desc.contains("ice") {
         "snow"
@@ -152,6 +153,21 @@ pub async fn get_weather_condition() -> Option<String> {
         "cloudy"
     } else {
         "clear"
-    };
-    Some(code.to_string())
+    }
+}
+
+/// Simplified condition plus temperature, for frontend effects and the
+/// summer event trigger.
+#[derive(serde::Serialize)]
+pub struct WeatherSnapshot {
+    pub condition: String,
+    pub temp_c: Option<f64>,
+}
+
+pub async fn get_weather_snapshot() -> Option<WeatherSnapshot> {
+    let info = get_weather().await?;
+    Some(WeatherSnapshot {
+        condition: simplify_condition(&info.condition).to_string(),
+        temp_c: info.temp_c,
+    })
 }

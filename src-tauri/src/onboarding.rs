@@ -44,6 +44,8 @@ pub struct SheepConfig {
     pub break_reminders: bool,
     #[serde(default = "default_easter_mode")]
     pub easter_mode: String,
+    #[serde(default = "default_summer_mode")]
+    pub summer_mode: String,
     #[serde(default)]
     pub weather_location: String,
     #[serde(default)]
@@ -62,6 +64,10 @@ fn default_easter_mode() -> String {
     "auto".to_string()
 }
 
+fn default_summer_mode() -> String {
+    "auto".to_string()
+}
+
 impl Default for SheepConfig {
     fn default() -> Self {
         Self {
@@ -72,6 +78,7 @@ impl Default for SheepConfig {
             friends: Vec::new(),
             break_reminders: true,
             easter_mode: "auto".to_string(),
+            summer_mode: "auto".to_string(),
             weather_location: String::new(),
             accessories: Vec::new(),
         }

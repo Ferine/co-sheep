@@ -8,6 +8,7 @@ import { getPersonalityQuips, getPersonalityAnimBias } from "./friend-personalit
 import { createCompositeOverlay, drawEasterBasket } from "./accessories";
 import { EasterHuntSummary, GroupActivity, canStartGroupActivity, createGroupActivity, pickActivityType, updateGroupActivity } from "./group-activities";
 import { EasterStatsSnapshot, EasterTheme } from "./easter-theme";
+import { SummerTheme, SUMMER_IDLE_QUIPS } from "./summer-theme";
 import { invoke } from "@tauri-apps/api/core";
 
 const GOOD_COLLEAGUE_QUIPS = [
@@ -174,6 +175,7 @@ export class Flock {
   private nightAmbience: NightAmbience;
   private weatherEffects: WeatherEffects;
   private easterTheme: EasterTheme;
+  private summerTheme: SummerTheme;
   private reactiveCooldown: number = 0;
   private currentWeatherCondition: string | null = null;
   private lastNotificationHour: number = -1;
@@ -201,6 +203,7 @@ export class Flock {
     this.nightAmbience = new NightAmbience(screenWidth, screenHeight);
     this.weatherEffects = new WeatherEffects();
     this.easterTheme = new EasterTheme(screenWidth, screenHeight);
+    this.summerTheme = new SummerTheme(screenWidth, screenHeight);
 
     // Create main sheep
     this.main = new Sheep(screenWidth, screenHeight, "main");
@@ -474,6 +477,11 @@ export class Flock {
     }
     this.nightAmbience.updateScreenSize(w, h);
     this.easterTheme.updateScreenSize(w, h);
+    this.summerTheme.updateScreenSize(w, h);
+  }
+
+  setSummerMode(mode: "auto" | "on" | "off") {
+    this.summerTheme.setModeOverride(mode);
   }
 
   setEasterMode(mode: "auto" | "on" | "off") {
@@ -487,10 +495,11 @@ export class Flock {
     this.easterTheme.applyStats(stats);
   }
 
-  setWeatherCondition(c: string | null) {
+  setWeatherCondition(c: string | null, tempC: number | null = null) {
     const prev = this.weatherEffects.condition;
     this.currentWeatherCondition = c;
     this.weatherEffects.setCondition(c);
+    this.summerTheme.setWeather(c, tempC);
     if (c && c !== prev) {
       this.triggerFriendReactions("weather");
     }
@@ -512,6 +521,7 @@ export class Flock {
     this.nightAmbience.update(dt, sheepPositions);
     this.weatherEffects.update(dt, this.screenWidth, this.screenHeight);
     this.easterTheme.update(dt, sheepPositions);
+    this.summerTheme.update(dt, sheepPositions);
 
     // Update speech bubble positions
     this.mainBubble.updatePosition(this.main.x, this.main.y, this.main.displaySize);
@@ -578,8 +588,14 @@ export class Flock {
     // Easter theme background (flowers) — behind sheep
     this.easterTheme.drawBackground(ctx, this.screenWidth, this.screenHeight);
 
+    // Summer sun and glow — behind sheep
+    this.summerTheme.drawBackground(ctx, this.screenWidth, this.screenHeight);
+
     // Easter eggs and grass detail — beneath the flock
     this.easterTheme.drawMidground(ctx, this.screenWidth, this.screenHeight);
+
+    // Sunflowers — beneath the flock
+    this.summerTheme.drawMidground(ctx, this.screenWidth, this.screenHeight);
 
     // Main sheep first (behind friends)
     this.main.draw(ctx);
@@ -598,6 +614,9 @@ export class Flock {
 
     // Easter theme foreground (petals, eggs) — on top of sheep
     this.easterTheme.drawForeground(ctx, this.screenWidth, this.screenHeight);
+
+    // Summer butterflies and drifting seeds — on top of sheep
+    this.summerTheme.drawForeground(ctx, this.screenWidth, this.screenHeight);
 
     // Weather particles (rain/snow) — on top of sheep
     this.weatherEffects.draw(ctx);
@@ -645,7 +664,7 @@ export class Flock {
     }
     const centerX = sumX / participants.length;
 
-    const type = pickActivityType(this.easterTheme);
+    const type = pickActivityType(this.easterTheme, this.summerTheme);
     this.groupActivity = createGroupActivity(type, participants, centerX);
     console.log(`[co-sheep] Group activity started: ${type} with ${participants.length} participants`);
   }
@@ -904,6 +923,7 @@ export class Flock {
           hour: new Date().getHours(),
           easterTheme: this.easterTheme,
           recentEasterHunt: this.easterTheme.hasRecentHuntBuzz(),
+          summerActive: this.summerTheme.active,
           eggPaintingActive: a.sheep.state === "idle_egg_painting" || b.sheep.state === "idle_egg_painting",
         };
         const script = pickConversation(a.id, b.id, ctx);
@@ -1024,6 +1044,8 @@ export class Flock {
           pool = EASTER_POST_HUNT_QUIPS;
         } else if (this.easterTheme.active && Math.random() < 0.35) {
           pool = EASTER_IDLE_QUIPS;
+        } else if (this.summerTheme.active && Math.random() < 0.35) {
+          pool = SUMMER_IDLE_QUIPS;
         }
         const quip = pool[Math.floor(Math.random() * pool.length)];
         entry.bubble.show(quip, 5000);

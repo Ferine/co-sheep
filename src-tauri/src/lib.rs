@@ -137,6 +137,7 @@ async fn save_settings(
     language: String,
     break_reminders: bool,
     easter_mode: String,
+    summer_mode: String,
     weather_location: String,
 ) -> Result<(), String> {
     eprintln!(
@@ -151,6 +152,7 @@ async fn save_settings(
         c.language = language;
         c.break_reminders = break_reminders;
         c.easter_mode = easter_mode;
+        c.summer_mode = summer_mode;
         c.weather_location = weather_location;
     })
     .map_err(|e| e.to_string())?;
@@ -163,6 +165,7 @@ async fn save_settings(
             "language": config.language,
             "break_reminders": config.break_reminders,
             "easter_mode": config.easter_mode,
+            "summer_mode": config.summer_mode,
             "weather_location": config.weather_location,
         }),
     )
@@ -382,8 +385,8 @@ async fn save_moment(image_data: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn get_weather_condition() -> Option<String> {
-    weather::get_weather_condition().await
+async fn get_weather_snapshot() -> Option<weather::WeatherSnapshot> {
+    weather::get_weather_snapshot().await
 }
 
 #[tauri::command]
@@ -553,7 +556,7 @@ pub fn run() {
             remove_friend,
             open_friends_window,
             save_moment,
-            get_weather_condition,
+            get_weather_snapshot,
             get_window_positions,
             get_accessories,
             save_accessories,

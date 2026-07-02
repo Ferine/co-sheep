@@ -199,6 +199,16 @@
     </div>
 
     <div class="field">
+      <label>Summer Mode</label>
+      <select id="summer-mode">
+        <option value="auto">Auto (summer weather only)</option>
+        <option value="on">Always on</option>
+        <option value="off">Always off</option>
+      </select>
+      <div class="hint">Auto triggers in June&ndash;August when the weather is clear and warm (needs a weather location).</div>
+    </div>
+
+    <div class="field">
       <label style="display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 14px; color: #eee; cursor: pointer;">
         <input id="break-reminders" type="checkbox" checked style="width: auto; cursor: pointer;" />
         Break Reminders
@@ -227,6 +237,7 @@
       const savedMsg = document.getElementById('saved-msg');
       const weatherLocationInput = document.getElementById('weather-location');
       const easterModeSelect = document.getElementById('easter-mode');
+      const summerModeSelect = document.getElementById('summer-mode');
       const breakRemindersCheckbox = document.getElementById('break-reminders');
 
       const descriptions = {
@@ -263,6 +274,7 @@
           language: languageSelect.value,
           breakReminders: breakRemindersCheckbox.checked,
           easterMode: easterModeSelect.value,
+          summerMode: summerModeSelect.value,
           weatherLocation: weatherLocationInput.value.trim(),
         });
         savedMsg.classList.add('visible');
@@ -281,6 +293,7 @@
           languageSelect.value = settings.language || 'nynorsk';
           weatherLocationInput.value = settings.weather_location || '';
           easterModeSelect.value = settings.easter_mode || 'auto';
+          summerModeSelect.value = settings.summer_mode || 'auto';
           breakRemindersCheckbox.checked = settings.break_reminders !== false;
         } catch (e) {
           console.error('Failed to load settings:', e);

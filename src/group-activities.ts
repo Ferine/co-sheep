@@ -1,8 +1,10 @@
 import { Sheep } from "./sheep";
 import { SpeechBubble } from "./speech-bubble";
 import type { EasterTheme } from "./easter-theme";
+import type { SummerTheme } from "./summer-theme";
+import { SUNBATHE_QUIPS } from "./summer-theme";
 
-export type GroupActivityType = "campfire_circle" | "follow_leader" | "sync_bounce" | "huddle" | "easter_egg_hunt";
+export type GroupActivityType = "campfire_circle" | "follow_leader" | "sync_bounce" | "huddle" | "easter_egg_hunt" | "sunbathe";
 
 export interface EasterHuntFinder {
   eggsFound: number;
@@ -37,6 +39,8 @@ export interface GroupActivity {
   eggReactionTimer?: number;
   eggFinders?: Map<string, EasterHuntFinder>;
   huntSummary?: EasterHuntSummary;
+  // Sunbathe state: countdown to the next lazy quip
+  quipTimer?: number;
 }
 
 const DISPLAY_SIZE = 96;
@@ -105,6 +109,7 @@ export function createGroupActivity(
     sync_bounce: 6000,
     huddle: 10000 + Math.random() * 5000,
     easter_egg_hunt: 20000 + Math.random() * 10000,
+    sunbathe: 14000 + Math.random() * 8000,
   };
 
   return {
@@ -120,12 +125,19 @@ export function createGroupActivity(
     collectedEggs: type === "easter_egg_hunt" ? new Set() : undefined,
     eggReactionTimer: type === "easter_egg_hunt" ? 0 : undefined,
     eggFinders: type === "easter_egg_hunt" ? new Map() : undefined,
+    quipTimer: type === "sunbathe" ? 3000 : undefined,
   };
 }
 
-export function pickActivityType(easterTheme?: EasterTheme | null): GroupActivityType {
+export function pickActivityType(
+  easterTheme?: EasterTheme | null,
+  summerTheme?: SummerTheme | null,
+): GroupActivityType {
   if (easterTheme?.active && Math.random() < 0.4) {
     return "easter_egg_hunt";
+  }
+  if (summerTheme?.active && Math.random() < 0.4) {
+    return "sunbathe";
   }
   const types: GroupActivityType[] = ["campfire_circle", "follow_leader", "sync_bounce", "huddle"];
   return types[Math.floor(Math.random() * types.length)];
@@ -201,6 +213,9 @@ function updateGathering(
     } else if (activity.type === "easter_egg_hunt") {
       const first = getSheep(activity.participants[0]);
       if (first) first.bubble.show("Easter egg hunt!", 3000);
+    } else if (activity.type === "sunbathe") {
+      const first = getSheep(activity.participants[0]);
+      if (first) first.bubble.show("Sunbathing time!", 3000);
     }
   }
 
@@ -294,6 +309,33 @@ function updatePerforming(
       if (finished) {
         startHuntCelebration(activity, getSheep, easterTheme);
         return true;
+      }
+      break;
+    }
+
+    case "sunbathe": {
+      // Everyone flops down and soaks up the sun
+      for (const id of activity.participants) {
+        const entry = getSheep(id);
+        if (!entry) continue;
+        if (entry.sheep.state !== "sit") {
+          (entry.sheep as any).state = "sit";
+          (entry.sheep as any).stateTimer = 0;
+          (entry.sheep as any).stateDuration = activity.duration;
+        }
+      }
+
+      // A lazy quip every few seconds from a random sunbather
+      if (activity.quipTimer !== undefined) {
+        activity.quipTimer -= dt;
+        if (activity.quipTimer <= 0) {
+          activity.quipTimer = 4500 + Math.random() * 4000;
+          const id = activity.participants[Math.floor(Math.random() * activity.participants.length)];
+          const entry = getSheep(id);
+          if (entry && !entry.bubble.visible) {
+            entry.bubble.show(SUNBATHE_QUIPS[Math.floor(Math.random() * SUNBATHE_QUIPS.length)], 3000);
+          }
+        }
       }
       break;
     }

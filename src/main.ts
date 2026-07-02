@@ -64,10 +64,12 @@ async function init() {
       break_reminders: boolean;
       accessories: string[];
       easter_mode: "auto" | "on" | "off";
+      summer_mode: "auto" | "on" | "off";
     }>("get_settings");
     personality = settings.personality || "snarky";
     breakReminder.setEnabled(settings.break_reminders);
     flock.setEasterMode(settings.easter_mode || "auto");
+    flock.setSummerMode(settings.summer_mode || "auto");
     if (settings.accessories && settings.accessories.length > 0) {
       flock.main.drawOverlay = createCompositeOverlay(settings.accessories);
     }
@@ -298,10 +300,12 @@ async function init() {
     personality: string;
     break_reminders: boolean;
     easter_mode: "auto" | "on" | "off";
+    summer_mode: "auto" | "on" | "off";
   }>("settings-changed", (event) => {
     personality = event.payload.personality || "snarky";
     breakReminder.setEnabled(event.payload.break_reminders);
     flock.setEasterMode(event.payload.easter_mode || "auto");
+    flock.setSummerMode(event.payload.summer_mode || "auto");
   });
 
   // Capture moment event
@@ -349,8 +353,10 @@ async function init() {
 
 async function pollWeather() {
   try {
-    const condition = await invoke<string | null>("get_weather_condition");
-    flock.setWeatherCondition(condition);
+    const snapshot = await invoke<{ condition: string; temp_c: number | null } | null>(
+      "get_weather_snapshot",
+    );
+    flock.setWeatherCondition(snapshot?.condition ?? null, snapshot?.temp_c ?? null);
   } catch (e) {
     console.log("[co-sheep] Weather poll failed:", e);
   }

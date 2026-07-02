@@ -35,7 +35,7 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 - **Reactive emotes** — when the main sheep gets AI commentary, nearby friends react ("WHAT", "Hmm.", "*pretends not to notice*")
 - **45+ conversation scripts** — personality-pair dialogues, time-aware morning/night exchanges, weather-aware banter, running gags
 - **AI-generated conversations** — 30% chance that friend pairs have unique on-device-generated dialogue instead of scripted lines
-- **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations
+- **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations, group sunbathing in summer
 - **Notifications** — friends greet on launch, comment on nightfall, echo break reminders
 
 ### Friend Memory
@@ -99,6 +99,7 @@ Accessible from the macOS menu bar or tray icon:
 - **Personality** — Snarky, Wholesome, Chaotic, or Passive-Aggressive
 - **Language** — defaults to Nynorsk, with 10 language options
 - **Weather location** — city name for weather awareness and effects
+- **Summer Mode** — auto (June–August when the weather is clear and warm), always on, or off
 - **Break reminders** — toggle 45-min work break nudges
 
 Settings are stored at `~/.co-sheep/config.json`.

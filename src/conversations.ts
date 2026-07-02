@@ -11,6 +11,7 @@ export interface ConversationContext {
   easterTheme?: EasterTheme | null;
   recentEasterHunt?: boolean;
   eggPaintingActive?: boolean;
+  summerActive?: boolean;
 }
 
 // $A and $B are placeholders resolved at pick time
@@ -128,6 +129,51 @@ const MAIN_SHEEP_SCRIPTS: ScriptTemplate[] = [
     { speakerId: "main", text: "I literally told the human that 5 minutes ago.", duration: 4500, delay: 700, animation: "headshake" },
     { speakerId: "$FRIEND", text: "Did they listen?", duration: 3000, delay: 600 },
     { speakerId: "main", text: "What do you think.", duration: 3000, delay: 700 },
+  ],
+];
+
+// --- Summer scripts (active during warm clear summer weather) ---
+
+const SUMMER_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "$A", text: "Is it just me or is the sun EXTRA today?", duration: 4000, delay: 0 },
+    { speakerId: "$B", text: "It's not just you. My wool is cooking.", duration: 4000, delay: 700, animation: "vibrate" },
+  ],
+  [
+    { speakerId: "$A", text: "We should get ice cream.", duration: 3000, delay: 0 },
+    { speakerId: "$B", text: "We're pixels. On a screen.", duration: 3500, delay: 700 },
+    { speakerId: "$A", text: "...pixel ice cream then.", duration: 3000, delay: 800, animation: "bounce" },
+  ],
+  [
+    { speakerId: "$A", text: "A butterfly just followed me for ten minutes.", duration: 4000, delay: 0 },
+    { speakerId: "$B", text: "It thinks you're a flower. Bold of it.", duration: 4000, delay: 800, animation: "headshake" },
+  ],
+  [
+    { speakerId: "$A", text: "Summer plans?", duration: 2500, delay: 0 },
+    { speakerId: "$B", text: "Standing here. Slightly to the left maybe.", duration: 4000, delay: 700 },
+    { speakerId: "$A", text: "Ambitious.", duration: 2500, delay: 700 },
+  ],
+  [
+    { speakerId: "$A", text: "The human is inside on a day like THIS?", duration: 4000, delay: 0 },
+    { speakerId: "$B", text: "Shh. If they leave, who do we judge?", duration: 4000, delay: 800 },
+  ],
+];
+
+const SUMMER_GC_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "good_colleague", text: "Fellesferie snart.", duration: 3000, delay: 0 },
+    { speakerId: "$OTHER", text: "You say that every day.", duration: 3500, delay: 700 },
+    { speakerId: "good_colleague", text: "*ser drøymande ut*", duration: 3000, delay: 700 },
+  ],
+  [
+    { speakerId: "$OTHER", text: "Aren't you hot in that tie?", duration: 3500, delay: 0 },
+    { speakerId: "good_colleague", text: "Det er sommartider. Kortermet skjorte.", duration: 3500, delay: 800 },
+    { speakerId: "$OTHER", text: "...you look exactly the same.", duration: 3500, delay: 700, animation: "headshake" },
+  ],
+  [
+    { speakerId: "good_colleague", text: "Fin dag. Kaffi ute?", duration: 3000, delay: 0 },
+    { speakerId: "$OTHER", text: "Hot coffee? In this heat?", duration: 3000, delay: 700 },
+    { speakerId: "good_colleague", text: "Ja.", duration: 2000, delay: 600 },
   ],
 ];
 
@@ -426,6 +472,14 @@ export function pickConversation(
       }
       return pickFrom(EASTER_SCRIPTS, idA, idB);
     }
+  }
+
+  // Try summer scripts (seasonal chance during warm clear weather)
+  if (context?.summerActive && Math.random() < 0.25) {
+    if (hasGC) {
+      return pickFrom(SUMMER_GC_SCRIPTS, idA, idB);
+    }
+    return pickFrom(SUMMER_SCRIPTS, idA, idB);
   }
 
   // Try weather-aware scripts (25% chance when weather active)
