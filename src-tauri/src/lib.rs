@@ -1,3 +1,4 @@
+mod apple_ai;
 mod capture;
 mod cursor;
 mod easter_memory;

@@ -167,6 +167,7 @@
       <select id="ai-provider">
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="lmstudio">LM Studio (local)</option>
+        <option value="apple">Apple Intelligence (on-device)</option>
       </select>
       <div class="hint" id="provider-hint">Uses Claude Haiku + Sonnet via Anthropic API.</div>
     </div>
@@ -296,6 +297,7 @@
       const providerHints = {
         anthropic: 'Uses Claude Haiku + Sonnet via Anthropic API.',
         lmstudio: 'Uses a local model via LM Studio\'s OpenAI-compatible API.',
+        apple: 'On-device Apple Intelligence — free, private, nothing leaves your Mac. Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled. Screen awareness uses on-device OCR (text only).',
       };
 
       function updateProviderUI() {

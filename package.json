@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run build:helper && vite",
     "build": "tsc && vite build",
-    "build:tauri": "npm run clean:bundle-temp && npm run build",
+    "build:helper": "sh ./scripts/build-apple-helper.sh",
+    "build:tauri": "npm run clean:bundle-temp && npm run build:helper && npm run build",
     "bundle:dmg": "bash ./scripts/build-dmg.sh",
     "clean:bundle-temp": "rm -f src-tauri/target/release/bundle/macos/rw.*.dmg src-tauri/target/release/bundle/dmg/rw.*.dmg",
     "preview": "vite preview",

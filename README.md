@@ -95,7 +95,7 @@ The "Sheep's Brain" viewer (accessible from the menu) lets you inspect opinions,
 Accessible from the macOS menu bar or tray icon:
 
 - **Sheep name** — rename your sheep anytime
-- **AI Provider** — Anthropic (Claude) or LM Studio (local models)
+- **AI Provider** — Anthropic (Claude), LM Studio (local models), or Apple Intelligence (on-device)
 - **API key** — enter directly in settings or set `ANTHROPIC_API_KEY` env var
 - **Commentary interval** — 30 seconds to 10 minutes
 - **Personality** — Snarky, Wholesome, Chaotic, or Passive-Aggressive
@@ -123,7 +123,7 @@ Available from the tray icon and macOS menu bar:
 - macOS (uses CoreGraphics for cursor tracking and screen capture)
 - [Node.js](https://nodejs.org/) (v18+)
 - [Rust](https://rustup.rs/) (stable)
-- An [Anthropic API key](https://console.anthropic.com/) or [LM Studio](https://lmstudio.ai/) with a vision model
+- An [Anthropic API key](https://console.anthropic.com/), [LM Studio](https://lmstudio.ai/) with a vision model, or macOS 26+ on Apple Silicon with Apple Intelligence enabled (on-device, no key needed)
 
 ## Setup
 
@@ -219,7 +219,9 @@ co-sheep/
 
 ## Cost
 
-With the default 2.5 minute interval running all day: roughly $1-3/day in API costs. Haiku classification keeps costs low by only invoking Sonnet when something interesting is on screen. Friend AI conversations use Haiku (cheap). LM Studio option for zero API cost.
+With the default 2.5 minute interval running all day: roughly $1-3/day in API costs. Haiku classification keeps costs low by only invoking Sonnet when something interesting is on screen. Friend AI conversations use Haiku (cheap). LM Studio and Apple Intelligence options run locally for zero API cost.
+
+Note on the Apple Intelligence provider: Apple's on-device foundation model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) instead of the actual pixels. Commentary is a bit less visual but everything stays on your Mac. The helper binary is built automatically by `npm run build:tauri` (requires Xcode 26+ for the FoundationModels SDK; older Xcode builds a stub that reports the provider as unavailable).
 
 ## License
 

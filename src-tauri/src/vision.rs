@@ -43,6 +43,9 @@ pub(crate) struct CommentaryEvent {
 enum AiProvider {
     Anthropic { api_key: String },
     LmStudio { endpoint: String, model: String },
+    /// Apple Intelligence on-device model via the apple-ai-helper sidecar.
+    /// Text-only, so screen understanding goes through Vision OCR.
+    Apple,
 }
 
 fn get_provider() -> Result<AiProvider, String> {
@@ -52,6 +55,7 @@ fn get_provider() -> Result<AiProvider, String> {
             endpoint: onboarding::get_lmstudio_endpoint(),
             model: onboarding::get_lmstudio_model(),
         }),
+        "apple" => Ok(AiProvider::Apple),
         _ => {
             let api_key = onboarding::get_api_key()
                 .ok_or("No API key configured")?;
@@ -158,6 +162,31 @@ async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
                 return false;
             }
         }
+    } else if provider == "apple" {
+        match crate::apple_ai::check_available().await {
+            Ok(()) => {
+                eprintln!("[co-sheep] Apple Intelligence is available");
+            }
+            Err(reason) => {
+                eprintln!("[co-sheep] Apple Intelligence unavailable: {}", reason);
+                let msg = match reason.as_str() {
+                    "appleIntelligenceNotEnabled" => {
+                        "Apple Intelligence is turned off! Enable it in System Settings > Apple Intelligence & Siri, then I can think locally."
+                    }
+                    "modelNotReady" => {
+                        "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."
+                    }
+                    "deviceNotEligible" | "requiresMacOS26" => {
+                        "This Mac can't run Apple Intelligence (needs Apple Silicon + macOS 26). Pick another AI provider in Settings!"
+                    }
+                    _ => {
+                        "I can't reach the on-device Apple Intelligence model. Check Settings, or pick another AI provider."
+                    }
+                };
+                app.emit("sheep-commentary", msg).ok();
+                return false;
+            }
+        }
     }
 
     // 2. Check screen capture permission by actually trying a capture.
@@ -207,9 +236,21 @@ pub async fn run_vision_pipeline(
     let screenshot_b64 =
         tokio::task::spawn_blocking(|| capture::capture_screen()).await??;
 
+    // The on-device Apple model is text-only — OCR the screenshot once and
+    // feed the recognized text to both passes instead of the image
+    let screen_text = match &provider {
+        AiProvider::Apple => {
+            eprintln!("[co-sheep] OCR-ing screen for on-device model...");
+            let text = crate::apple_ai::ocr_screen(&screenshot_b64).await?;
+            eprintln!("[co-sheep] OCR extracted {} chars", text.len());
+            Some(text)
+        }
+        _ => None,
+    };
+
     // Pass 1: Classification
     eprintln!("[co-sheep] Pass 1: Classifying screen...");
-    let classification = classify_screen(&provider, &screenshot_b64).await?;
+    let classification = classify_screen(&provider, &screenshot_b64, screen_text.as_deref()).await?;
     eprintln!(
         "[co-sheep] Classification: interesting={}, summary={}",
         classification.interesting, classification.summary
@@ -231,6 +272,7 @@ pub async fn run_vision_pipeline(
     let raw_response = generate_commentary(
         &provider,
         &screenshot_b64,
+        screen_text.as_deref(),
         &classification.summary,
         &recent_context,
     )
@@ -545,6 +587,42 @@ async fn generate_commentary_openai(
     Ok(text.to_string())
 }
 
+// ─── Apple Intelligence (on-device, text-only via OCR) ──────────────────────
+
+const CLASSIFY_PROMPT_APPLE: &str = "Below is text extracted (OCR) from a screenshot of the user's screen. Guess what app/website is active and whether anything notable is happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content).\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work.";
+
+/// The on-device model has a small (~4k token) context window — keep the
+/// OCR dump well under it so the system prompt and journal still fit.
+const APPLE_OCR_BUDGET: usize = 4000;
+
+async fn classify_screen_apple(
+    screen_text: &str,
+) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
+    let screen_text = crate::apple_ai::truncate_utf8(screen_text, APPLE_OCR_BUDGET);
+    let prompt = format!("Screen text:\n{}\n\n{}", screen_text, CLASSIFY_PROMPT_APPLE);
+    let raw = crate::apple_ai::generate(
+        "You classify screen content for a desktop pet app. Reply only with the requested JSON.",
+        &prompt,
+    )
+    .await?;
+    parse_classification(&raw)
+}
+
+async fn generate_commentary_apple(
+    screen_text: &str,
+    context: &str,
+    recent_journal: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let weather_ctx = crate::weather::get_weather_context().await;
+    let system_prompt = personality::get_system_prompt(recent_journal, &weather_ctx);
+    let screen_text = crate::apple_ai::truncate_utf8(screen_text, APPLE_OCR_BUDGET);
+    let prompt = format!(
+        "Context: {}\n\nText visible on the screen (OCR):\n{}\n\n{}",
+        context, screen_text, COMMENTARY_PROMPT
+    );
+    crate::apple_ai::generate(&system_prompt, &prompt).await
+}
+
 // ─── Chat (text-only, for conversation mode) ────────────────────────────────
 
 pub async fn chat_with_sheep(
@@ -563,6 +641,7 @@ pub async fn chat_with_sheep(
         AiProvider::LmStudio { endpoint, model } => {
             chat_openai(endpoint, model, &system_prompt, user_message).await?
         }
+        AiProvider::Apple => crate::apple_ai::generate(&system_prompt, user_message).await?,
     };
 
     eprintln!("[co-sheep] Chat raw response: {}", raw_response);
@@ -701,6 +780,7 @@ Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null"#,
         AiProvider::LmStudio { endpoint, model } => {
             chat_openai(endpoint, model, &system_prompt, &user_msg).await?
         }
+        AiProvider::Apple => crate::apple_ai::generate(&system_prompt, &user_msg).await?,
     };
 
     eprintln!("[co-sheep] Friend chat raw: {}", raw);
@@ -748,6 +828,7 @@ fn parse_classification(text: &str) -> Result<HaikuClassification, Box<dyn std::
 async fn classify_screen(
     provider: &AiProvider,
     screenshot_b64: &str,
+    screen_text: Option<&str>,
 ) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
     match provider {
         AiProvider::Anthropic { api_key } => {
@@ -756,12 +837,16 @@ async fn classify_screen(
         AiProvider::LmStudio { endpoint, model } => {
             classify_screen_openai(endpoint, model, screenshot_b64).await
         }
+        AiProvider::Apple => {
+            classify_screen_apple(screen_text.ok_or("Apple provider requires OCR text")?).await
+        }
     }
 }
 
 async fn generate_commentary(
     provider: &AiProvider,
     screenshot_b64: &str,
+    screen_text: Option<&str>,
     context: &str,
     recent_journal: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -772,6 +857,14 @@ async fn generate_commentary(
         AiProvider::LmStudio { endpoint, model } => {
             generate_commentary_openai(endpoint, model, screenshot_b64, context, recent_journal)
                 .await
+        }
+        AiProvider::Apple => {
+            generate_commentary_apple(
+                screen_text.ok_or("Apple provider requires OCR text")?,
+                context,
+                recent_journal,
+            )
+            .await
         }
     }
 }
