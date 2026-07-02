@@ -103,6 +103,15 @@ export class Sheep {
     return this.screenHeight - this.displaySize - DOCK_MARGIN;
   }
 
+  /** Ground level accounting for the window platform we're standing on */
+  private get effectiveGroundY(): number {
+    if (this.currentPlatform) {
+      const landY = this.currentPlatform.y - this.displaySize;
+      if (landY < this.groundY) return landY;
+    }
+    return this.groundY;
+  }
+
   get displaySize(): number {
     return Math.round(DISPLAY_SIZE * this.scaleMultiplier);
   }
@@ -140,6 +149,9 @@ export class Sheep {
   /** Trigger a named animation. Interrupts idle/walk/sit but not grabbed. */
   playAnimation(anim: SheepAnimation) {
     if (this.state === "grabbed" || this.state === "parachute") return;
+    // Leaving a stack via an animation must clear the stack pointers, or
+    // the bottom sheep stays "occupied" and later flings us from afar
+    if (this.state === "stacked") this.unstack();
     this.resetActivity();
     console.log(`[co-sheep:${this.id}] Playing animation:`, anim);
 
@@ -299,6 +311,28 @@ export class Sheep {
       this.stackedOn.stackedBy = null;
       this.stackedOn = null;
     }
+  }
+
+  /** Fully detach from any stack, in both directions — used when this
+   * sheep is removed from the flock so nobody tracks a ghost. */
+  detachFromStack() {
+    if (this.stackedBy) {
+      this.stackedBy.stackedOn = null;
+      this.stackedBy.vy = -150;
+      this.stackedBy.setState("fall", 0);
+      this.stackedBy = null;
+    }
+    this.unstack();
+  }
+
+  /** Re-align with the ground after a screen resize — grounded states
+   * never touch y themselves, so they'd float or sink otherwise. */
+  reground() {
+    this.x = Math.max(0, Math.min(this.x, this.screenWidth - this.displaySize));
+    const airborne: SheepState[] = ["grabbed", "parachute", "fall", "trampoline", "stacked", "bounce", "backflip"];
+    if (airborne.includes(this.state)) return;
+    if (this.currentPlatform) return; // platform validity check handles this
+    this.y = this.groundY;
   }
 
   /** Called when the platform this sheep is standing on disappears */
@@ -547,7 +581,7 @@ export class Sheep {
     if (this.walkTarget !== null) {
       this.facingRight = this.walkTarget > this.x;
       const dist = Math.abs(this.walkTarget - this.x);
-      const duration = Math.max(3000, (dist / WALK_SPEED) * 1000 + 2000);
+      const duration = Math.max(3000, (dist / this.walkSpeed) * 1000 + 2000);
       this.setState("walk", duration);
       return;
     }
@@ -753,16 +787,28 @@ export class Sheep {
 
     if (this.x <= 0) {
       this.x = 0;
-      this.setState("idle", 2000 + Math.random() * 3000);
+      this.endStampede();
       return;
     }
     if (this.x >= this.screenWidth - this.displaySize) {
       this.x = this.screenWidth - this.displaySize;
-      this.setState("idle", 2000 + Math.random() * 3000);
+      this.endStampede();
       return;
     }
 
     if (this.stateTimer >= this.stateDuration) {
+      this.endStampede();
+    }
+  }
+
+  /** Stampede only moves x — a sheep that stampeded off a platform (or
+   * while airborne) must fall afterwards, not hover where it ended up. */
+  private endStampede() {
+    if (this.y < this.groundY - 1) {
+      this.vy = 0;
+      this.setState("fall", 0);
+    } else {
+      this.y = this.groundY;
       this.setState("idle", 2000 + Math.random() * 3000);
     }
   }
@@ -871,8 +917,9 @@ export class Sheep {
     this.vy += 800 * (dt / 1000); // gravity
     this.y += this.vy * (dt / 1000);
 
-    if (this.y >= this.groundY) {
-      this.y = this.groundY;
+    // Land back on the platform we bounced from, not through it
+    if (this.y >= this.effectiveGroundY) {
+      this.y = this.effectiveGroundY;
       if (this.stateTimer >= this.stateDuration) {
         this.setState("idle", 1000 + Math.random() * 2000);
       } else {
@@ -883,7 +930,9 @@ export class Sheep {
 
   private updateTimedAnimation() {
     if (this.stateTimer >= this.stateDuration) {
-      this.y = this.groundY;
+      // Settle on the current platform if standing on one — snapping to
+      // the global ground would teleport the sheep off its window
+      this.y = this.effectiveGroundY;
       this.setState("idle", 1000 + Math.random() * 2000);
     }
   }

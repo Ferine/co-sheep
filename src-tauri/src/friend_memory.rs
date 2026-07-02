@@ -13,6 +13,10 @@ pub struct FriendBrain {
     pub memories: Vec<FriendMemory>,
     pub stats: FriendStats,
     pub last_mood_change: String,
+    /// Last date decay_affinities ran for this brain — persisted so app
+    /// restarts within the same day don't decay/age the brain again.
+    #[serde(default)]
+    pub last_decay_date: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -98,6 +102,7 @@ fn new_brain(id: &str, name: &str) -> FriendBrain {
         memories: Vec::new(),
         stats: FriendStats::default(),
         last_mood_change: now_iso(),
+        last_decay_date: today(),
     }
 }
 
@@ -241,14 +246,22 @@ pub fn get_all_moods() -> HashMap<String, String> {
 
 pub fn decay_affinities() {
     let today_str = today();
-    let mut last = LAST_DECAY_DATE.lock().unwrap();
-    if *last == today_str {
-        return;
+    {
+        // Cheap in-process fast path; the real once-per-day guard is the
+        // persisted per-brain last_decay_date below.
+        let mut last = LAST_DECAY_DATE.lock().unwrap();
+        if *last == today_str {
+            return;
+        }
+        *last = today_str.clone();
     }
-    *last = today_str.clone();
 
     let mut cache = CACHE.lock().unwrap();
     for brain in cache.values_mut() {
+        if brain.last_decay_date == today_str {
+            continue;
+        }
+        brain.last_decay_date = today_str.clone();
         // Reset daily conversation count
         brain.stats.conversations_today = 0;
         brain.stats.days_alive += 1;

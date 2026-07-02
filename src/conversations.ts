@@ -116,10 +116,6 @@ const MAIN_SHEEP_SCRIPTS: ScriptTemplate[] = [
     { speakerId: "main", text: "Wouldn't YOU?", duration: 3000, delay: 800, animation: "bounce" },
   ],
   [
-    { speakerId: "good_colleague", text: "Bra jobba i dag.", duration: 3000, delay: 0 },
-    { speakerId: "main", text: "He just complimented you... I think.", duration: 4500, delay: 700 },
-  ],
-  [
     { speakerId: "$FRIEND", text: "What are you thinking about?", duration: 3500, delay: 0 },
     { speakerId: "main", text: "How many tabs the human has open. It haunts me.", duration: 5000, delay: 800, animation: "vibrate" },
   ],
@@ -132,6 +128,15 @@ const MAIN_SHEEP_SCRIPTS: ScriptTemplate[] = [
     { speakerId: "main", text: "I literally told the human that 5 minutes ago.", duration: 4500, delay: 700, animation: "headshake" },
     { speakerId: "$FRIEND", text: "Did they listen?", duration: 3000, delay: 600 },
     { speakerId: "main", text: "What do you think.", duration: 3000, delay: 700 },
+  ],
+];
+
+// Only valid when Good Colleague himself is a participant — the script
+// names him as a speaker, so it can't live in the generic main pool
+const MAIN_GC_SCRIPTS: ScriptTemplate[] = [
+  [
+    { speakerId: "good_colleague", text: "Bra jobba i dag.", duration: 3000, delay: 0 },
+    { speakerId: "main", text: "He just complimented you... I think.", duration: 4500, delay: 700 },
   ],
 ];
 
@@ -423,14 +428,6 @@ export function pickConversation(
     }
   }
 
-  // Try Easter scripts (baseline seasonal chance)
-  if (context?.easterTheme?.active && Math.random() < 0.25) {
-    if (hasGC) {
-      return pickFrom(EASTER_GC_SCRIPTS, idA, idB);
-    }
-    return pickFrom(EASTER_SCRIPTS, idA, idB);
-  }
-
   // Try weather-aware scripts (25% chance when weather active)
   if (context?.weather && Math.random() < 0.25) {
     let weatherPool: ScriptTemplate[] = [];
@@ -456,7 +453,7 @@ export function pickConversation(
   // Fall back to character-specific pools
   let pool: ScriptTemplate[];
   if (hasGC && hasMain) {
-    pool = MAIN_SHEEP_SCRIPTS;
+    pool = [...MAIN_SHEEP_SCRIPTS, ...MAIN_GC_SCRIPTS];
   } else if (hasGC) {
     pool = GOOD_COLLEAGUE_SCRIPTS;
   } else if (hasMain) {

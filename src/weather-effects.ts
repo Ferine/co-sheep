@@ -33,7 +33,7 @@ export class WeatherEffects {
           y: -10 - Math.random() * 50,
           vx: -20 + Math.random() * 10, // slight wind
           vy: 300 + Math.random() * 200,
-          life: 1,
+          life: Math.random() * Math.PI * 2,
         });
       }
     } else if (this._condition === "snow") {
@@ -43,7 +43,8 @@ export class WeatherEffects {
           y: -10 - Math.random() * 30,
           vx: 0,
           vy: 20 + Math.random() * 40,
-          life: 1,
+          // Random phase so flakes get distinct sway and twinkle
+          life: Math.random() * Math.PI * 2,
         });
       }
     }
@@ -52,6 +53,7 @@ export class WeatherEffects {
     this.particles = this.particles.filter((p) => {
       p.x += p.vx * dtSec;
       p.y += p.vy * dtSec;
+      p.life += dtSec; // drives per-particle sway phase and twinkle
 
       // Snow: horizontal sine drift
       if (this._condition === "snow") {

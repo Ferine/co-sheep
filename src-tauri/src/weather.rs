@@ -48,7 +48,19 @@ struct WttrDesc {
 }
 
 async fn fetch_weather(location: &str) -> Result<WeatherInfo, Box<dyn std::error::Error + Send + Sync>> {
-    let encoded = location.replace(' ', "+");
+    // Percent-encode the location as a path segment — characters like
+    // '/', '?', '#' or '%' in a user-entered location would otherwise
+    // corrupt the URL and drop the ?format=j1 query.
+    let encoded: String = location
+        .bytes()
+        .map(|b| match b {
+            b' ' => "+".to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b',' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
+        })
+        .collect();
     let url = format!("https://wttr.in/{}?format=j1", encoded);
     eprintln!("[co-sheep] Fetching weather from: {}", url);
 

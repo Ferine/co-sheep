@@ -307,14 +307,6 @@ function updatePerforming(
     startDispersing(activity, getSheep);
   }
 
-  // Call campfire update for the leader during campfire_circle
-  if (activity.type === "campfire_circle") {
-    const leader = getSheep(activity.participants[0]);
-    if (leader) {
-      leader.sheep.update(dt);
-    }
-  }
-
   return true;
 }
 
@@ -410,8 +402,9 @@ function updateEasterEggHunt(
     const egg = eggs[targetIdx];
     if (!egg) continue;
 
-    // Check if reached the egg (before setting walk target so we don't overshoot)
-    if (Math.abs(entry.sheep.x - egg.x) < EGG_COLLECTION_RADIUS) {
+    // Check if reached the egg — compare sheep center to egg center
+    const sheepCenter = entry.sheep.x + entry.sheep.displaySize / 2;
+    if (Math.abs(sheepCenter - egg.x) < EGG_COLLECTION_RADIUS) {
       activity.collectedEggs!.add(targetIdx);
       activity.eggAssignments.delete(id);
       easterTheme.collectEgg(targetIdx, id);
@@ -422,19 +415,23 @@ function updateEasterEggHunt(
 
       // Show reaction
       entry.sheep.playAnimation("bounce");
-      const personalityKey = entry.personality || (id === "good_colleague" ? "good_colleague" : "");
+      // Good Colleague gets its dedicated pool even though it also has a
+      // regular personality
+      const personalityKey = id === "good_colleague" ? "good_colleague" : (entry.personality || "");
       const quipPool = EGG_HUNT_PERSONALITY_QUIPS[personalityKey] || EGG_HUNT_QUIPS;
       const quip = quipPool[Math.floor(Math.random() * quipPool.length)];
       entry.bubble.show(quip, 3000);
       continue;
     }
 
-    // Walk toward egg — force into walk state if sitting/idling
-    entry.sheep.walkTarget = egg.x;
+    // Steer toward the egg by facing only — walkTarget's arrival radius
+    // (1.5×displaySize) is far larger than the collection radius, so the
+    // sit-on-arrival logic would thrash walk/sit for the final approach
+    entry.sheep.walkTarget = null;
+    entry.sheep.facingRight = egg.x > sheepCenter;
     const state = entry.sheep.state;
     if (state === "idle" || state === "sit" || state === "idle_sleep" || state === "idle_campfire" ||
         state === "idle_counting" || state === "idle_egg_painting") {
-      entry.sheep.facingRight = egg.x > entry.sheep.x;
       (entry.sheep as any).state = "walk";
       (entry.sheep as any).stateTimer = 0;
       (entry.sheep as any).stateDuration = 15000; // long enough to reach the egg
@@ -511,7 +508,9 @@ function finalizeHuntSummary(
 
   activity.huntSummary = {
     totalEggs: activity.huntSummary?.totalEggs ?? easterTheme?.getEggPositions().length ?? activity.collectedEggs?.size ?? 0,
-    durationMs: activity.timer,
+    // Keep the duration captured at hunt end — the celebration phase
+    // re-finalizes after resetting activity.timer
+    durationMs: activity.huntSummary?.durationMs ?? activity.timer,
     allCollected,
     paintedEggsUsed: activity.huntSummary?.paintedEggsUsed ?? easterTheme?.getPaintedEggsUsedCount() ?? 0,
     winnerId: finders[0] && finders[0].eggsFound > 0 ? finders[0].id : undefined,

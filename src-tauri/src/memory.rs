@@ -3,6 +3,24 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// Serializes load→mutate→save cycles on opinions.json so concurrent
+/// commands (vision loop, chat, interactions) don't drop each other's writes.
+static BRAIN_LOCK: Mutex<()> = Mutex::new(());
+
+/// Last `max_bytes` of `s`, cut forward to a char boundary so slicing
+/// never panics on multibyte UTF-8 (the journal is full of æ/ø/å).
+fn tail_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut start = s.len() - max_bytes;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
 
 fn sheep_dir() -> PathBuf {
     let home = dirs::home_dir().expect("Could not find home directory");
@@ -104,6 +122,7 @@ pub fn save_opinion(
     opinion_text: &str,
     category: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = BRAIN_LOCK.lock().unwrap();
     let mut brain = load_brain();
     let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -136,6 +155,7 @@ pub fn save_opinion(
 
 /// Increment a daily counter (e.g. "twitter_visits") and return the new count.
 pub fn increment_today(key: &str) -> u32 {
+    let _guard = BRAIN_LOCK.lock().unwrap();
     let mut brain = load_brain();
     let count = brain.today_counts.entry(key.to_string()).or_insert(0);
     *count += 1;
@@ -146,6 +166,7 @@ pub fn increment_today(key: &str) -> u32 {
 
 /// Record that the sheep made a comment
 pub fn record_comment() {
+    let _guard = BRAIN_LOCK.lock().unwrap();
     let mut brain = load_brain();
     brain.total_comments += 1;
     save_brain(&brain).ok();
@@ -153,9 +174,12 @@ pub fn record_comment() {
 
 /// Record a user interaction (pet, double-click, file drop, etc.)
 pub fn record_interaction(interaction_type: &str) {
-    let mut brain = load_brain();
-    brain.total_interactions += 1;
-    save_brain(&brain).ok();
+    {
+        let _guard = BRAIN_LOCK.lock().unwrap();
+        let mut brain = load_brain();
+        brain.total_interactions += 1;
+        save_brain(&brain).ok();
+    }
 
     // Also log to today's journal
     append_journal(&format!("*My human {} me!*", interaction_type)).ok();
@@ -200,12 +224,7 @@ pub fn get_today_journal() -> Result<String, Box<dyn std::error::Error>> {
     }
 
     let content = fs::read_to_string(&path)?;
-
-    if content.len() > 2000 {
-        Ok(content[content.len() - 2000..].to_string())
-    } else {
-        Ok(content)
-    }
+    Ok(tail_at_char_boundary(&content, 2000).to_string())
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -258,12 +277,12 @@ pub fn get_recent_context() -> Result<String, Box<dyn std::error::Error>> {
     if !journal.is_empty() {
         // Only the tail — the opinions carry the persistent knowledge
         let tail = if journal.len() > 1200 {
-            let start = journal.len() - 1200;
-            let cut = journal[start..]
+            let approx = tail_at_char_boundary(&journal, 1200);
+            // Start at the next full line if we cut mid-line
+            approx
                 .find('\n')
-                .map(|i| start + i + 1)
-                .unwrap_or(start);
-            &journal[cut..]
+                .map(|i| &approx[i + 1..])
+                .unwrap_or(approx)
         } else {
             &journal
         };

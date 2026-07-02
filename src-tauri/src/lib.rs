@@ -147,23 +147,20 @@ async fn save_settings(
         if api_key.is_empty() { "(empty)" } else { "(set)" }
     );
     // Preserve existing friends and accessories when saving settings
-    let existing = onboarding::load_config().unwrap_or_default();
-    let config = onboarding::SheepConfig {
-        name,
-        personality,
-        interval_secs,
-        api_key,
-        language,
-        ai_provider,
-        lmstudio_endpoint,
-        lmstudio_model,
-        friends: existing.friends,
-        break_reminders,
-        easter_mode,
-        weather_location,
-        accessories: existing.accessories,
-    };
-    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    let config = onboarding::update_config(|c| {
+        c.name = name;
+        c.personality = personality;
+        c.interval_secs = interval_secs;
+        c.api_key = api_key;
+        c.language = language;
+        c.ai_provider = ai_provider;
+        c.lmstudio_endpoint = lmstudio_endpoint;
+        c.lmstudio_model = lmstudio_model;
+        c.break_reminders = break_reminders;
+        c.easter_mode = easter_mode;
+        c.weather_location = weather_location;
+    })
+    .map_err(|e| e.to_string())?;
     app.emit(
         "settings-changed",
         serde_json::json!({
@@ -243,8 +240,7 @@ async fn get_friends() -> Result<Vec<onboarding::FriendDef>, String> {
 
 #[tauri::command]
 async fn add_friend(app: tauri::AppHandle, name: String, color: String, personality: String) -> Result<(), String> {
-    let mut config = onboarding::load_config().unwrap_or_default();
-    let id = format!(
+    let base_id = format!(
         "friend_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -252,16 +248,25 @@ async fn add_friend(app: tauri::AppHandle, name: String, color: String, personal
             .as_millis()
     );
     let scale = 0.85 + (rand_f64() * 0.3); // 0.85–1.15
-    let friend = onboarding::FriendDef {
-        id: id.clone(),
-        name: name.clone(),
-        color: color.clone(),
-        personality: personality.clone(),
-        accessories: Vec::new(),
-        scale,
-    };
-    config.friends.push(friend);
-    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    let mut id = base_id.clone();
+    onboarding::update_config(|config| {
+        // Two adds in the same millisecond would otherwise share an id
+        // (and thus a brain file)
+        let mut suffix = 1;
+        while config.friends.iter().any(|f| f.id == id) {
+            id = format!("{}_{}", base_id, suffix);
+            suffix += 1;
+        }
+        config.friends.push(onboarding::FriendDef {
+            id: id.clone(),
+            name: name.clone(),
+            color: color.clone(),
+            personality: personality.clone(),
+            accessories: Vec::new(),
+            scale,
+        });
+    })
+    .map_err(|e| e.to_string())?;
     friend_memory::ensure_brain(&id, &name);
     app.emit(
         "add-friend",
@@ -273,20 +278,28 @@ async fn add_friend(app: tauri::AppHandle, name: String, color: String, personal
 }
 
 fn rand_f64() -> f64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    (nanos as f64 % 1000.0) / 1000.0
+    // RandomState is seeded from OS entropy, so hashing the clock gives a
+    // usable spread even on platforms whose clock has coarse granularity
+    // (raw low nanosecond digits can be constantly zero).
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    (hasher.finish() % 1_000_000) as f64 / 1_000_000.0
 }
 
 #[tauri::command]
 async fn save_friend_accessories(app: tauri::AppHandle, id: String, accessories: Vec<String>) -> Result<(), String> {
-    let mut config = onboarding::load_config().unwrap_or_default();
-    if let Some(friend) = config.friends.iter_mut().find(|f| f.id == id) {
-        friend.accessories = accessories.clone();
-    }
-    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    onboarding::update_config(|config| {
+        if let Some(friend) = config.friends.iter_mut().find(|f| f.id == id) {
+            friend.accessories = accessories.clone();
+        }
+    })
+    .map_err(|e| e.to_string())?;
     app.emit("friend-accessories-changed", serde_json::json!({ "id": id, "accessories": accessories }))
         .map_err(|e| e.to_string())?;
     eprintln!("[co-sheep] Friend {} accessories saved", id);
@@ -295,9 +308,8 @@ async fn save_friend_accessories(app: tauri::AppHandle, id: String, accessories:
 
 #[tauri::command]
 async fn remove_friend(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut config = onboarding::load_config().unwrap_or_default();
-    config.friends.retain(|f| f.id != id);
-    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    onboarding::update_config(|config| config.friends.retain(|f| f.id != id))
+        .map_err(|e| e.to_string())?;
     app.emit("remove-friend", &id)
         .map_err(|e| e.to_string())?;
     eprintln!("[co-sheep] Removed friend: {}", id);
@@ -397,9 +409,8 @@ async fn get_accessories() -> Vec<String> {
 
 #[tauri::command]
 async fn save_accessories(app: tauri::AppHandle, accessories: Vec<String>) -> Result<(), String> {
-    let mut config = onboarding::load_config().unwrap_or_default();
-    config.accessories = accessories;
-    onboarding::write_config(&config).map_err(|e| e.to_string())?;
+    onboarding::update_config(|config| config.accessories = accessories)
+        .map_err(|e| e.to_string())?;
     app.emit("accessories-changed", ())
         .map_err(|e| e.to_string())?;
     eprintln!("[co-sheep] Accessories saved");

@@ -96,7 +96,12 @@ export class InputBubble {
     const rect = this.element.getBoundingClientRect();
     const halfW = rect.width / 2;
     const clampedX = Math.max(halfW + 4, Math.min(bubbleX, window.innerWidth - halfW - 4));
-    const clampedBottom = Math.max(rect.height + 16, window.innerHeight - bubbleY);
+    // Clamp against the top edge too — the chat input must stay visible
+    // even when the sheep is high up on a window platform
+    const clampedBottom = Math.min(
+      Math.max(rect.height + 16, window.innerHeight - bubbleY),
+      window.innerHeight - rect.height - 8,
+    );
 
     this.element.style.left = `${clampedX}px`;
     this.element.style.bottom = `${clampedBottom}px`;

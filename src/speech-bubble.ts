@@ -125,11 +125,16 @@ export class SpeechBubble {
     const bubbleX = sheepX + sheepSize / 2;
     const bubbleY = sheepY - 20;
 
-    // Clamp to viewport edges so bubbles don't overflow
+    // Clamp to viewport edges so bubbles don't overflow — including the
+    // top edge, or a sheep high on a window platform pushes the bubble
+    // entirely off-screen
     const rect = this.element.getBoundingClientRect();
     const halfW = rect.width / 2;
     const clampedX = Math.max(halfW + 4, Math.min(bubbleX, window.innerWidth - halfW - 4));
-    const clampedBottom = Math.max(rect.height + 16, window.innerHeight - bubbleY);
+    const clampedBottom = Math.min(
+      Math.max(rect.height + 16, window.innerHeight - bubbleY),
+      window.innerHeight - rect.height - 8,
+    );
 
     this.element.style.left = `${clampedX}px`;
     this.element.style.bottom = `${clampedBottom}px`;

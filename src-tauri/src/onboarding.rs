@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// Serializes read-modify-write cycles on config.json so concurrent
+/// commands (settings save, add/remove friend, wardrobe) can't drop
+/// each other's changes.
+static CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FriendDef {
@@ -105,10 +111,32 @@ pub fn needs_onboarding() -> Result<bool, Box<dyn std::error::Error>> {
 
 pub fn save_config(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Preserve existing config if it exists, just update the name
-    let mut config = load_config().unwrap_or_default();
-    config.name = name.to_string();
+    update_config(|c| c.name = name.to_string()).map(|_| ())
+}
 
-    write_config(&config)
+/// Load for a read-modify-write: a missing file yields defaults, but a
+/// corrupt file is an error — otherwise the next save would silently
+/// replace the API key, friends, and settings with defaults.
+fn load_config_strict() -> Result<SheepConfig, Box<dyn std::error::Error>> {
+    let path = config_path();
+    if !path.exists() {
+        return Ok(SheepConfig::default());
+    }
+    let content = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
+}
+
+/// Locked read-modify-write of the config. All mutations must go through
+/// here rather than load_config() + write_config().
+pub fn update_config<F>(mutate: F) -> Result<SheepConfig, Box<dyn std::error::Error>>
+where
+    F: FnOnce(&mut SheepConfig),
+{
+    let _guard = CONFIG_LOCK.lock().unwrap();
+    let mut config = load_config_strict()?;
+    mutate(&mut config);
+    write_config(&config)?;
+    Ok(config)
 }
 
 pub fn load_config() -> Option<SheepConfig> {

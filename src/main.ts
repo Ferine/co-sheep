@@ -111,6 +111,7 @@ async function init() {
       dragOffsetX = e.clientX - target.x;
       dragOffsetY = e.clientY - target.y;
       // Clear petting state so hearts don't resume after release
+      if (hoverTarget && hoverTarget !== target) hoverTarget.stopPetting();
       hoverTarget = null;
       hoverTimer = 0;
       target.grab();
@@ -173,7 +174,9 @@ async function init() {
     const target = flock.hitTest(e.clientX, e.clientY);
     if (target) {
       if (hoverTarget !== target) {
-        // Started hovering a new target
+        // Started hovering a new target — release the old one, or it
+        // stays in "petting" forever (that state has no timeout)
+        if (hoverTarget) hoverTarget.stopPetting();
         hoverTarget = target;
         hoverTimer = performance.now();
       } else if (

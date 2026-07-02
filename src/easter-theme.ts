@@ -440,13 +440,13 @@ export class EasterTheme {
       }
     }
 
-    this.petals = this.petals.filter((petal) => {
-      if (petal.y < -20 || petal.x < -20 || petal.x > this.screenWidth + 20) {
-        this.petals.push(this.spawnPetal());
-        return false;
-      }
-      return true;
-    });
+    // Respawn petals that drifted off-screen (pushing into the array
+    // being filtered would be discarded by the filter's return value)
+    this.petals = this.petals.map((petal) =>
+      petal.y < -20 || petal.x < -20 || petal.x > this.screenWidth + 20
+        ? this.spawnPetal()
+        : petal,
+    );
   }
 
   private spawnPetal(): Petal {

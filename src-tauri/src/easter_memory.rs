@@ -58,7 +58,11 @@ pub struct EasterStats {
     pub hunters: HashMap<String, EasterHunterStats>,
 }
 
+// These two arrive from the frontend, which sends camelCase keys
+// (totalEggs, eggsFound, ...); without the rename every field would
+// silently fall back to its serde default.
 #[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct EasterHunterResult {
     pub id: String,
     pub name: String,
@@ -69,6 +73,7 @@ pub struct EasterHunterResult {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct EasterHuntResult {
     #[serde(default)]
     pub total_eggs: u32,

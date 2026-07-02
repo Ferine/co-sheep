@@ -290,6 +290,9 @@ export class Flock {
     if (id === "good_colleague") return; // can't remove the colleague
     const entry = this.friends.get(id);
     if (entry) {
+      // Detach from any stack, or a sheep riding the removed friend keeps
+      // tracking its ghost forever (and vice versa)
+      entry.sheep.detachFromStack();
       entry.bubble.destroy();
       this.friends.delete(id);
     }
@@ -326,17 +329,23 @@ export class Flock {
   triggerStampede(mouseX: number, _mouseY: number) {
     if (this.stampedeCooldown > 0 || this.stampedeActive) return;
 
-    this.stampedeActive = true;
-    this.stampedeDialogueTimer = 2500; // dialogue 2.5s after stampede starts
     this.stampedeCooldown = 15000;
-
     this.cancelConversation();
 
     this.main.startStampede(mouseX);
     for (const entry of this.friends.values()) {
       entry.sheep.startStampede(mouseX);
     }
-    console.log("[co-sheep] STAMPEDE triggered!");
+
+    // Only queue post-stampede dialogue if someone actually stampeded
+    // (everyone could be parachuting/stacked and thus exempt)
+    const anyStampeding = this.main.state === "stampede" ||
+      Array.from(this.friends.values()).some(e => e.sheep.state === "stampede");
+    if (anyStampeding) {
+      this.stampedeActive = true;
+      this.stampedeDialogueTimer = 2500; // dialogue 2.5s after stampede starts
+      console.log("[co-sheep] STAMPEDE triggered!");
+    }
   }
 
   /** Check if a dropped sheep should stack on another */
@@ -457,9 +466,11 @@ export class Flock {
     this.screenHeight = h;
     this.main.screenWidth = w;
     this.main.screenHeight = h;
+    this.main.reground();
     for (const entry of this.friends.values()) {
       entry.sheep.screenWidth = w;
       entry.sheep.screenHeight = h;
+      entry.sheep.reground();
     }
     this.nightAmbience.updateScreenSize(w, h);
     this.easterTheme.updateScreenSize(w, h);
@@ -511,8 +522,14 @@ export class Flock {
     // Process pending friend reactions
     this.updatePendingReactions(dt);
 
+    // Social tick — probability rolls that assume a 500ms cadence run
+    // only on these ticks, not every frame
+    this.socialTimer += dt;
+    const socialTick = this.socialTimer > 500;
+    if (socialTick) this.socialTimer = 0;
+
     // Conversations
-    this.updateConversations(dt);
+    this.updateConversations(dt, socialTick);
 
     // Reactive emote cooldown
     if (this.reactiveCooldown > 0) this.reactiveCooldown -= dt;
@@ -535,12 +552,10 @@ export class Flock {
     this.checkFriendNotifications(dt);
 
     // Group activities
-    this.updateGroupActivityLoop(dt);
+    this.updateGroupActivityLoop(dt, socialTick);
 
     // Social behaviors + periodic quips
-    this.socialTimer += dt;
-    if (this.socialTimer > 500) {
-      this.socialTimer = 0;
+    if (socialTick) {
       if (!this.groupActivity) {
         this.updateSocialBehaviors();
       }
@@ -591,7 +606,7 @@ export class Flock {
     this.nightAmbience.drawForeground(ctx, this.screenWidth, this.screenHeight, positions);
   }
 
-  private updateGroupActivityLoop(dt: number) {
+  private updateGroupActivityLoop(dt: number, socialTick: boolean) {
     if (this.groupActivityCooldown > 0) {
       this.groupActivityCooldown -= dt;
     }
@@ -605,11 +620,12 @@ export class Flock {
       return;
     }
 
-    // Try to start a group activity (only on social ticks, very rare)
+    // Try to start a group activity (only on 500ms social ticks, very rare)
+    if (!socialTick) return;
     if (this.groupActivityCooldown > 0) return;
     if (this.activeConversation) return;
     if (this.friends.size < 2) return; // need at least 3 total (main + 2 friends)
-    if (Math.random() > 0.001) return; // 0.1% per tick (~every 16ms)
+    if (Math.random() > 0.001) return; // 0.1% per tick
 
     const sheepList: Array<{ id: string; x: number; calm: boolean }> = [
       { id: "main", x: this.main.x, calm: this.isCalm(this.main.state) },
@@ -658,9 +674,9 @@ export class Flock {
     if (this.notificationCooldown > 0) this.notificationCooldown -= dt;
     this.launchTimer += dt;
 
-    // Launch greeting — 8s after start, once
+    // Launch greeting — 8s after start, once someone has actually landed
+    // (don't burn the one-shot flag while everyone is still parachuting)
     if (!this.hasGreetedOnLaunch && this.launchTimer > 8000 && this.friends.size > 0) {
-      this.hasGreetedOnLaunch = true;
       const GREETINGS: Record<FriendPersonality, string[]> = {
         wholesome: ["Good to be here! Ready for a great day!", "Hello everyone!"],
         chaotic: ["I'M ALIVE AGAIN! WHAT DID I MISS?!", "LET'S GOOOOO"],
@@ -675,6 +691,7 @@ export class Flock {
           text: pool[Math.floor(Math.random() * pool.length)],
           delay: 1000 + Math.random() * 3000,
         };
+        this.hasGreetedOnLaunch = true;
         this.notificationCooldown = 120000;
         break; // only one friend greets
       }
@@ -707,7 +724,6 @@ export class Flock {
 
   private triggerFriendReactions(_cause: string) {
     if (this.reactiveCooldown > 0) return;
-    this.reactiveCooldown = 30000; // 30s cooldown
 
     const REACTION_MESSAGES: Record<FriendPersonality, string[]> = {
       wholesome: ["Oh!", "Yay!", "*looks over excitedly*", "How nice!"],
@@ -742,6 +758,8 @@ export class Flock {
       };
       count++;
     }
+    // Only burn the cooldown if someone actually reacted
+    if (count > 0) this.reactiveCooldown = 30000;
   }
 
   private updatePendingReactions(dt: number) {
@@ -807,7 +825,7 @@ export class Flock {
     this.groupActivityCooldown = 300000 + Math.random() * 300000;
   }
 
-  private updateConversations(dt: number) {
+  private updateConversations(dt: number, socialTick: boolean) {
     if (this.activeConversation) {
       const conv = this.activeConversation;
       conv.timer -= dt;
@@ -847,9 +865,9 @@ export class Flock {
       return;
     }
 
-    // Try to start a conversation on social ticks
-    // (socialTimer resets every 500ms, so this runs at that cadence via update())
+    // Try to start a conversation on social ticks (every 500ms)
     // ~2% chance per pair per social tick
+    if (!socialTick) return;
     const allSheep: Array<{ id: string; sheep: Sheep; bubble: SpeechBubble }> = [
       { id: "main", sheep: this.main, bubble: this.mainBubble },
     ];
@@ -958,6 +976,9 @@ export class Flock {
       }
     }).catch((e) => {
       this.aiChatPending = false;
+      // Back off on failure too, or a broken backend (offline, no API
+      // key) gets re-invoked every time the conversation cooldown lapses
+      this.aiChatCooldown = 600000;
       console.error("[co-sheep] AI friend chat failed:", e);
     });
   }

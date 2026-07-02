@@ -79,11 +79,15 @@ export class SpriteSheet {
       }
       const tc = SpriteSheet.tintCanvas;
       const tctx = SpriteSheet.tintCtx!;
-      if (tc.width !== w || tc.height !== h) {
-        tc.width = w;
-        tc.height = h;
+      // Canvas dimensions are integers — compare against rounded sizes or a
+      // fractional w/h reallocates (and stalls) on every single draw
+      const cw = Math.ceil(w);
+      const ch = Math.ceil(h);
+      if (tc.width !== cw || tc.height !== ch) {
+        tc.width = cw;
+        tc.height = ch;
       } else {
-        tctx.clearRect(0, 0, w, h);
+        tctx.clearRect(0, 0, cw, ch);
       }
 
       tctx.imageSmoothingEnabled = false;
