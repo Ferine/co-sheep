@@ -66,9 +66,10 @@ async fn get_screen_info() -> Result<screen_info::ScreenInfo, String> {
     screen_info::get_primary_screen_info().map_err(|e| e.to_string())
 }
 
+/// Whether the on-device Apple Intelligence model is ready to use.
 #[tauri::command]
-async fn check_api_key() -> bool {
-    onboarding::get_api_key().is_some()
+async fn check_ai_ready() -> bool {
+    apple_ai::check_available().await.is_ok()
 }
 
 #[tauri::command]
@@ -133,30 +134,21 @@ async fn save_settings(
     name: String,
     personality: String,
     interval_secs: u64,
-    api_key: String,
     language: String,
-    ai_provider: String,
-    lmstudio_endpoint: String,
-    lmstudio_model: String,
     break_reminders: bool,
     easter_mode: String,
     weather_location: String,
 ) -> Result<(), String> {
     eprintln!(
-        "[co-sheep] Saving settings: name={}, personality={}, interval={}s, language={}, provider={}, api_key={}",
-        name, personality, interval_secs, language, ai_provider,
-        if api_key.is_empty() { "(empty)" } else { "(set)" }
+        "[co-sheep] Saving settings: name={}, personality={}, interval={}s, language={}",
+        name, personality, interval_secs, language
     );
     // Preserve existing friends and accessories when saving settings
     let config = onboarding::update_config(|c| {
         c.name = name;
         c.personality = personality;
         c.interval_secs = interval_secs;
-        c.api_key = api_key;
         c.language = language;
-        c.ai_provider = ai_provider;
-        c.lmstudio_endpoint = lmstudio_endpoint;
-        c.lmstudio_model = lmstudio_model;
         c.break_reminders = break_reminders;
         c.easter_mode = easter_mode;
         c.weather_location = weather_location;
@@ -169,7 +161,6 @@ async fn save_settings(
             "personality": config.personality,
             "interval_secs": config.interval_secs,
             "language": config.language,
-            "ai_provider": config.ai_provider,
             "break_reminders": config.break_reminders,
             "easter_mode": config.easter_mode,
             "weather_location": config.weather_location,
@@ -544,7 +535,7 @@ pub fn run() {
             save_sheep_name,
             open_naming_window,
             get_screen_info,
-            check_api_key,
+            check_ai_ready,
             check_screen_permission,
             update_sheep_bounds_multi,
             set_dragging,

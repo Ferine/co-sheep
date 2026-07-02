@@ -11,9 +11,9 @@ A desktop companion sheep that watches your screen and delivers snarky commentar
 ## What it does
 
 - A pixel sheep parachutes onto your desktop and wanders around
-- Every few minutes, it captures your screen and sends it through a two-pass AI vision pipeline
-- **Pass 1** (Haiku): cheap classification — is anything interesting happening?
-- **Pass 2** (Sonnet): commentary with expressive animations — only when warranted
+- Every few minutes, it captures your screen and runs it through a two-pass, fully on-device AI pipeline (Apple Intelligence + Vision OCR — nothing ever leaves your Mac)
+- **Pass 1**: cheap classification — is anything interesting happening?
+- **Pass 2**: commentary with expressive animations — only when warranted
 - The sheep forms persistent opinions about you that grow stronger over time
 - It keeps daily tallies ("that's the 5th time on Twitter today") and a markdown diary
 - You can drag it, pet it, double-click it, or drop files on it
@@ -34,7 +34,7 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 - **Personality idle activities** — chaotic friends zoom around randomly, wholesome friends emit hearts, snarky friends judge-stare with a magnifying glass, passive-aggressive friends sigh dramatically
 - **Reactive emotes** — when the main sheep gets AI commentary, nearby friends react ("WHAT", "Hmm.", "*pretends not to notice*")
 - **45+ conversation scripts** — personality-pair dialogues, time-aware morning/night exchanges, weather-aware banter, running gags
-- **AI-generated conversations** — 30% chance that friend pairs have unique Haiku-generated dialogue instead of scripted lines
+- **AI-generated conversations** — 30% chance that friend pairs have unique on-device-generated dialogue instead of scripted lines
 - **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations
 - **Notifications** — friends greet on launch, comment on nightfall, echo break reminders
 
@@ -95,8 +95,6 @@ The "Sheep's Brain" viewer (accessible from the menu) lets you inspect opinions,
 Accessible from the macOS menu bar or tray icon:
 
 - **Sheep name** — rename your sheep anytime
-- **AI Provider** — Anthropic (Claude), LM Studio (local models), or Apple Intelligence (on-device)
-- **API key** — enter directly in settings or set `ANTHROPIC_API_KEY` env var
 - **Commentary interval** — 30 seconds to 10 minutes
 - **Personality** — Snarky, Wholesome, Chaotic, or Passive-Aggressive
 - **Language** — defaults to Nynorsk, with 10 language options
@@ -123,7 +121,8 @@ Available from the tray icon and macOS menu bar:
 - macOS (uses CoreGraphics for cursor tracking and screen capture)
 - [Node.js](https://nodejs.org/) (v18+)
 - [Rust](https://rustup.rs/) (stable)
-- An [Anthropic API key](https://console.anthropic.com/), [LM Studio](https://lmstudio.ai/) with a vision model, or macOS 26+ on Apple Silicon with Apple Intelligence enabled (on-device, no key needed)
+- macOS 26+ (Tahoe) on Apple Silicon with Apple Intelligence enabled — the AI runs entirely on-device
+- Xcode 26+ (for the FoundationModels SDK used by the bundled helper)
 
 ## Setup
 
@@ -136,11 +135,6 @@ npm run tauri dev
 
 # Build for production
 npm run tauri build
-```
-
-Set your API key either in the Settings window or via environment:
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 The `.app` bundle will be at `src-tauri/target/release/bundle/macos/co-sheep.app`.
@@ -163,14 +157,17 @@ co-sheep needs screen recording permission to see your screen. On first launch:
 [xcap: capture screen -> resize 1568px -> JPEG q70 -> base64]
     |
     v
-[Pass 1: Haiku classifies screenshot]
+[Vision OCR extracts on-screen text (on-device)]
+    |
+    v
+[Pass 1: on-device model classifies the screen text]
     |
     +-- not interesting -> skip, log to diary
     |
     +-- interesting
          |
          v
-       [Pass 2: Sonnet generates comment + animation + opinion + count]
+       [Pass 2: on-device model generates comment + animation + opinion + count]
          |
          v
        [Speech bubble + animation on sheep]
@@ -217,11 +214,9 @@ co-sheep/
     └── assets/sprites/          # Pixel art sprite sheets
 ```
 
-## Cost
+## Cost & privacy
 
-With the default 2.5 minute interval running all day: roughly $1-3/day in API costs. Haiku classification keeps costs low by only invoking Sonnet when something interesting is on screen. Friend AI conversations use Haiku (cheap). LM Studio and Apple Intelligence options run locally for zero API cost.
-
-Note on the Apple Intelligence provider: Apple's on-device foundation model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) instead of the actual pixels. Commentary is a bit less visual but everything stays on your Mac. The helper binary is built automatically by `npm run build:tauri` (requires Xcode 26+ for the FoundationModels SDK; older Xcode builds a stub that reports the provider as unavailable).
+Zero API cost — everything runs on Apple's on-device foundation model. Your screen content never leaves your Mac: Apple's model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) rather than the actual pixels. The helper binary that bridges to the FoundationModels framework is built automatically by `npm run build:tauri` (requires Xcode 26+; older Xcode builds a stub that reports the AI as unavailable).
 
 ## License
 

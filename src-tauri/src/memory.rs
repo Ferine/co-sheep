@@ -228,7 +228,7 @@ pub fn get_today_journal() -> Result<String, Box<dyn std::error::Error>> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Combined Context — what gets fed to Sonnet
+// Combined Context — what gets fed to the model
 // ═══════════════════════════════════════════════════════════
 
 /// Build the full context for the AI: opinions + daily counts + recent journal.

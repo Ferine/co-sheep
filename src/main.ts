@@ -271,15 +271,15 @@ async function init() {
   listen<string>("naming-complete", async (event) => {
     const name = event.payload;
     console.log("[co-sheep] Naming complete:", name);
-    const hasKey = await invoke<boolean>("check_api_key");
-    if (hasKey) {
+    const aiReady = await invoke<boolean>("check_ai_ready");
+    if (aiReady) {
       flock.mainBubble.show(
         `Nice! I'm ${name} now. I can see everything. This is going to be fun. For me.`,
         6000,
       );
     } else {
       flock.mainBubble.show(
-        `I'm ${name}! But I can't see your screen yet. Set ANTHROPIC_API_KEY in your environment and restart me!`,
+        `I'm ${name}! But my brain isn't working yet — enable Apple Intelligence in System Settings so I can think.`,
         8000,
       );
     }

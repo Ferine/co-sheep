@@ -20,7 +20,7 @@ pub fn capture_screen() -> Result<String, Box<dyn std::error::Error + Send + Syn
 
     let dynamic = DynamicImage::ImageRgba8(screenshot);
 
-    // Resize so longest side is at most 1568px (Claude vision optimal) —
+    // Resize so longest side is at most 1568px (plenty for OCR) —
     // never upscale smaller screens, that only blurs and bloats the payload
     let (w, h) = (dynamic.width(), dynamic.height());
     let scale = (1568.0 / w.max(h) as f64).min(1.0);

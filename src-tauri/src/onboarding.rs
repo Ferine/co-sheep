@@ -29,21 +29,15 @@ fn default_friend_scale() -> f64 {
     1.0
 }
 
+// AI runs exclusively on-device (Apple Intelligence); old provider fields
+// (api_key, ai_provider, lmstudio_*) in existing config files are ignored.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SheepConfig {
     pub name: String,
     pub personality: String,
     pub interval_secs: u64,
-    #[serde(default)]
-    pub api_key: String,
     #[serde(default = "default_language")]
     pub language: String,
-    #[serde(default = "default_ai_provider")]
-    pub ai_provider: String,
-    #[serde(default = "default_lmstudio_endpoint")]
-    pub lmstudio_endpoint: String,
-    #[serde(default = "default_lmstudio_model")]
-    pub lmstudio_model: String,
     #[serde(default)]
     pub friends: Vec<FriendDef>,
     #[serde(default = "default_break_reminders")]
@@ -54,18 +48,6 @@ pub struct SheepConfig {
     pub weather_location: String,
     #[serde(default)]
     pub accessories: Vec<String>,
-}
-
-fn default_ai_provider() -> String {
-    "anthropic".to_string()
-}
-
-fn default_lmstudio_endpoint() -> String {
-    "http://localhost:1234".to_string()
-}
-
-fn default_lmstudio_model() -> String {
-    "qwen3.5-9b".to_string()
 }
 
 fn default_language() -> String {
@@ -86,11 +68,7 @@ impl Default for SheepConfig {
             name: "Sheep".to_string(),
             personality: "snarky".to_string(),
             interval_secs: 150,
-            api_key: String::new(),
             language: "nynorsk".to_string(),
-            ai_provider: "anthropic".to_string(),
-            lmstudio_endpoint: "http://localhost:1234".to_string(),
-            lmstudio_model: "qwen3.5-9b".to_string(),
             friends: Vec::new(),
             break_reminders: true,
             easter_mode: "auto".to_string(),
@@ -162,18 +140,6 @@ pub fn get_sheep_name() -> Option<String> {
     load_config().map(|c| c.name)
 }
 
-/// Returns API key from config, falling back to env var.
-pub fn get_api_key() -> Option<String> {
-    // Config takes priority
-    if let Some(config) = load_config() {
-        if !config.api_key.is_empty() {
-            return Some(config.api_key);
-        }
-    }
-    // Fall back to env var
-    std::env::var("ANTHROPIC_API_KEY").ok()
-}
-
 pub fn get_interval_secs() -> u64 {
     load_config()
         .map(|c| c.interval_secs)
@@ -190,24 +156,6 @@ pub fn get_language() -> String {
     load_config()
         .map(|c| c.language)
         .unwrap_or_else(|| "nynorsk".to_string())
-}
-
-pub fn get_ai_provider() -> String {
-    load_config()
-        .map(|c| c.ai_provider)
-        .unwrap_or_else(|| "anthropic".to_string())
-}
-
-pub fn get_lmstudio_endpoint() -> String {
-    load_config()
-        .map(|c| c.lmstudio_endpoint)
-        .unwrap_or_else(|| "http://localhost:1234".to_string())
-}
-
-pub fn get_lmstudio_model() -> String {
-    load_config()
-        .map(|c| c.lmstudio_model)
-        .unwrap_or_else(|| "qwen3.5-9b".to_string())
 }
 
 pub fn get_break_reminders() -> bool {

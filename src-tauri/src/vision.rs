@@ -1,6 +1,6 @@
+use crate::apple_ai;
 use crate::capture;
 use crate::memory;
-use crate::onboarding;
 use crate::permissions;
 use crate::personality;
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use tauri::Emitter;
 
 #[derive(Deserialize)]
-struct HaikuClassification {
+struct ScreenClassification {
     interesting: bool,
     #[allow(dead_code)]
     category: String,
@@ -16,7 +16,7 @@ struct HaikuClassification {
 }
 
 #[derive(Deserialize)]
-struct SonnetResponse {
+struct CommentaryResponse {
     text: String,
     animation: Option<String>,
     /// Topic key for opinion tracking (e.g. "twitter_usage")
@@ -37,31 +37,6 @@ struct SonnetResponse {
 pub(crate) struct CommentaryEvent {
     text: String,
     animation: Option<String>,
-}
-
-/// Which AI backend to use
-enum AiProvider {
-    Anthropic { api_key: String },
-    LmStudio { endpoint: String, model: String },
-    /// Apple Intelligence on-device model via the apple-ai-helper sidecar.
-    /// Text-only, so screen understanding goes through Vision OCR.
-    Apple,
-}
-
-fn get_provider() -> Result<AiProvider, String> {
-    let provider = onboarding::get_ai_provider();
-    match provider.as_str() {
-        "lmstudio" => Ok(AiProvider::LmStudio {
-            endpoint: onboarding::get_lmstudio_endpoint(),
-            model: onboarding::get_lmstudio_model(),
-        }),
-        "apple" => Ok(AiProvider::Apple),
-        _ => {
-            let api_key = onboarding::get_api_key()
-                .ok_or("No API key configured")?;
-            Ok(AiProvider::Anthropic { api_key })
-        }
-    }
 }
 
 pub async fn vision_loop(app: tauri::AppHandle) {
@@ -118,74 +93,33 @@ pub async fn vision_loop(app: tauri::AppHandle) {
     }
 }
 
-/// Checks API key, screen permission, and does a test capture.
+/// Checks the on-device model, screen permission, and does a test capture.
 /// Emits user-facing messages via speech bubble for each failure.
 /// Returns true if everything is ready.
 async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
-    // 1. Check provider config
-    let provider = onboarding::get_ai_provider();
-    if provider == "anthropic" {
-        if crate::onboarding::get_api_key().is_none() {
-            eprintln!("[co-sheep] No API key found (checked config + env)");
-            app.emit(
-                "sheep-commentary",
-                "I can't see anything without an API key! Open Settings from the tray menu, or set ANTHROPIC_API_KEY in your environment.",
-            )
-            .ok();
+    // 1. Check the on-device Apple Intelligence model
+    match apple_ai::check_available().await {
+        Ok(()) => {
+            eprintln!("[co-sheep] Apple Intelligence is available");
+        }
+        Err(reason) => {
+            eprintln!("[co-sheep] Apple Intelligence unavailable: {}", reason);
+            let msg = match reason.as_str() {
+                "appleIntelligenceNotEnabled" => {
+                    "Apple Intelligence is turned off! Enable it in System Settings > Apple Intelligence & Siri, then I can think locally."
+                }
+                "modelNotReady" => {
+                    "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."
+                }
+                "deviceNotEligible" | "requiresMacOS26" => {
+                    "This Mac can't run Apple Intelligence — I need Apple Silicon and macOS 26 to think. Sorry!"
+                }
+                _ => {
+                    "I can't reach the on-device Apple Intelligence model. Check System Settings > Apple Intelligence & Siri."
+                }
+            };
+            app.emit("sheep-commentary", msg).ok();
             return false;
-        }
-    } else if provider == "lmstudio" {
-        // Check LM Studio is reachable
-        let endpoint = onboarding::get_lmstudio_endpoint();
-        let url = format!("{}/v1/models", endpoint);
-        eprintln!("[co-sheep] Checking LM Studio at {}...", url);
-        match reqwest::Client::new().get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                eprintln!("[co-sheep] LM Studio is reachable");
-            }
-            Ok(resp) => {
-                eprintln!("[co-sheep] LM Studio returned status {}", resp.status());
-                app.emit(
-                    "sheep-commentary",
-                    "LM Studio is running but returned an error. Check that a model is loaded!",
-                )
-                .ok();
-                return false;
-            }
-            Err(e) => {
-                eprintln!("[co-sheep] Can't reach LM Studio: {}", e);
-                app.emit(
-                    "sheep-commentary",
-                    "Can't reach LM Studio! Make sure it's running and the server is started.",
-                )
-                .ok();
-                return false;
-            }
-        }
-    } else if provider == "apple" {
-        match crate::apple_ai::check_available().await {
-            Ok(()) => {
-                eprintln!("[co-sheep] Apple Intelligence is available");
-            }
-            Err(reason) => {
-                eprintln!("[co-sheep] Apple Intelligence unavailable: {}", reason);
-                let msg = match reason.as_str() {
-                    "appleIntelligenceNotEnabled" => {
-                        "Apple Intelligence is turned off! Enable it in System Settings > Apple Intelligence & Siri, then I can think locally."
-                    }
-                    "modelNotReady" => {
-                        "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."
-                    }
-                    "deviceNotEligible" | "requiresMacOS26" => {
-                        "This Mac can't run Apple Intelligence (needs Apple Silicon + macOS 26). Pick another AI provider in Settings!"
-                    }
-                    _ => {
-                        "I can't reach the on-device Apple Intelligence model. Check Settings, or pick another AI provider."
-                    }
-                };
-                app.emit("sheep-commentary", msg).ok();
-                return false;
-            }
         }
     }
 
@@ -224,8 +158,6 @@ pub async fn run_vision_pipeline(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     eprintln!("[co-sheep] --- Vision pipeline tick ---");
 
-    let provider = get_provider().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
-
     // Log preflight status but don't block — actual capture is the real test
     if !permissions::has_screen_capture_permission() {
         eprintln!("[co-sheep] Preflight says no permission, attempting capture anyway...");
@@ -236,21 +168,15 @@ pub async fn run_vision_pipeline(
     let screenshot_b64 =
         tokio::task::spawn_blocking(|| capture::capture_screen()).await??;
 
-    // The on-device Apple model is text-only — OCR the screenshot once and
-    // feed the recognized text to both passes instead of the image
-    let screen_text = match &provider {
-        AiProvider::Apple => {
-            eprintln!("[co-sheep] OCR-ing screen for on-device model...");
-            let text = crate::apple_ai::ocr_screen(&screenshot_b64).await?;
-            eprintln!("[co-sheep] OCR extracted {} chars", text.len());
-            Some(text)
-        }
-        _ => None,
-    };
+    // The on-device model is text-only — OCR the screenshot once and feed
+    // the recognized text to both passes instead of the image
+    eprintln!("[co-sheep] OCR-ing screen for on-device model...");
+    let screen_text = apple_ai::ocr_screen(&screenshot_b64).await?;
+    eprintln!("[co-sheep] OCR extracted {} chars", screen_text.len());
 
     // Pass 1: Classification
     eprintln!("[co-sheep] Pass 1: Classifying screen...");
-    let classification = classify_screen(&provider, &screenshot_b64, screen_text.as_deref()).await?;
+    let classification = classify_screen(&screen_text).await?;
     eprintln!(
         "[co-sheep] Classification: interesting={}, summary={}",
         classification.interesting, classification.summary
@@ -270,9 +196,7 @@ pub async fn run_vision_pipeline(
     eprintln!("[co-sheep] Pass 2: Generating commentary...");
     let recent_context = memory::get_recent_context().unwrap_or_default();
     let raw_response = generate_commentary(
-        &provider,
-        &screenshot_b64,
-        screen_text.as_deref(),
+        &screen_text,
         &classification.summary,
         &recent_context,
     )
@@ -328,14 +252,14 @@ struct ParsedResponse {
 
 /// Parse the response as JSON {text, animation, ...}, falling back to plain text.
 fn parse_commentary_response(raw: &str) -> ParsedResponse {
-    let trimmed = strip_think_blocks(raw)
+    let trimmed = raw
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
 
-    if let Ok(parsed) = serde_json::from_str::<SonnetResponse>(trimmed) {
+    if let Ok(parsed) = serde_json::from_str::<CommentaryResponse>(trimmed) {
         let valid_animations = [
             "bounce", "spin", "backflip", "headshake", "zoom", "vibrate",
         ];
@@ -356,7 +280,7 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
         eprintln!("[co-sheep] Failed to parse as JSON, using raw text");
         ParsedResponse {
             event: CommentaryEvent {
-                text: strip_think_blocks(raw).trim().to_string(),
+                text: raw.trim().to_string(),
                 animation: None,
             },
             opinion_topic: None,
@@ -367,240 +291,22 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
     }
 }
 
-// ─── Anthropic API ───────────────────────────────────────────────────────────
+// ─── On-device generation (Apple Intelligence via sidecar) ──────────────────
 
-async fn classify_screen_anthropic(
-    api_key: &str,
-    screenshot_b64: &str,
-) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
+const CLASSIFY_PROMPT: &str = "Below is text extracted (OCR) from a screenshot of the user's screen. Guess what app/website is active and whether anything notable is happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content).\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work.";
 
-    let body = serde_json::json!({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 256,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": screenshot_b64
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": CLASSIFY_PROMPT
-                }
-            ]
-        }]
-    });
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("Haiku API error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = resp_json["content"][0]["text"]
-        .as_str()
-        .ok_or("No text in Haiku response")?;
-
-    parse_classification(text)
-}
-
-async fn generate_commentary_anthropic(
-    api_key: &str,
-    screenshot_b64: &str,
-    context: &str,
-    recent_journal: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-    let weather_ctx = crate::weather::get_weather_context().await;
-    let system_prompt = personality::get_system_prompt(recent_journal, &weather_ctx);
-
-    let body = serde_json::json!({
-        "model": "claude-sonnet-4-5-20250929",
-        "max_tokens": 256,
-        "system": system_prompt,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": screenshot_b64
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": format!(
-                        "Context: {}\n\n{}",
-                        context, COMMENTARY_PROMPT
-                    )
-                }
-            ]
-        }]
-    });
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("Sonnet API error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = resp_json["content"][0]["text"]
-        .as_str()
-        .ok_or("No text in Sonnet response")?
-        .to_string();
-
-    Ok(text)
-}
-
-// ─── OpenAI-compatible API (LM Studio) ──────────────────────────────────────
-
-async fn classify_screen_openai(
-    endpoint: &str,
-    model: &str,
-    screenshot_b64: &str,
-) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", endpoint);
-    let image_url = format!("data:image/jpeg;base64,{}", screenshot_b64);
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": { "url": image_url }
-                },
-                {
-                    "type": "text",
-                    "text": format!("{} /no_think", CLASSIFY_PROMPT)
-                }
-            ]
-        }]
-    });
-
-    let resp = client
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("LM Studio classify error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = extract_openai_text(&resp_json)?;
-
-    parse_classification(text)
-}
-
-async fn generate_commentary_openai(
-    endpoint: &str,
-    model: &str,
-    screenshot_b64: &str,
-    context: &str,
-    recent_journal: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", endpoint);
-    let weather_ctx = crate::weather::get_weather_context().await;
-    let system_prompt = personality::get_system_prompt(recent_journal, &weather_ctx);
-    let image_url = format!("data:image/jpeg;base64,{}", screenshot_b64);
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": { "url": image_url }
-                    },
-                    {
-                        "type": "text",
-                        "text": format!(
-                            "Context: {}\n\n{} /no_think",
-                            context, COMMENTARY_PROMPT
-                        )
-                    }
-                ]
-            }
-        ]
-    });
-
-    let resp = client
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("LM Studio commentary error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = extract_openai_text(&resp_json)?;
-
-    Ok(text.to_string())
-}
-
-// ─── Apple Intelligence (on-device, text-only via OCR) ──────────────────────
-
-const CLASSIFY_PROMPT_APPLE: &str = "Below is text extracted (OCR) from a screenshot of the user's screen. Guess what app/website is active and whether anything notable is happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content).\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work.";
+const COMMENTARY_PROMPT: &str = "Give a short snarky comment (1-2 sentences max) about what you see on this screen. Stay in character. Reference past observations if relevant. Reply with JSON: {\"text\": \"your comment\", \"animation\": \"name_or_null\"}";
 
 /// The on-device model has a small (~4k token) context window — keep the
 /// OCR dump well under it so the system prompt and journal still fit.
-const APPLE_OCR_BUDGET: usize = 4000;
+const OCR_BUDGET: usize = 4000;
 
-async fn classify_screen_apple(
+async fn classify_screen(
     screen_text: &str,
-) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
-    let screen_text = crate::apple_ai::truncate_utf8(screen_text, APPLE_OCR_BUDGET);
-    let prompt = format!("Screen text:\n{}\n\n{}", screen_text, CLASSIFY_PROMPT_APPLE);
-    let raw = crate::apple_ai::generate(
+) -> Result<ScreenClassification, Box<dyn std::error::Error + Send + Sync>> {
+    let screen_text = apple_ai::truncate_utf8(screen_text, OCR_BUDGET);
+    let prompt = format!("Screen text:\n{}\n\n{}", screen_text, CLASSIFY_PROMPT);
+    let raw = apple_ai::generate(
         "You classify screen content for a desktop pet app. Reply only with the requested JSON.",
         &prompt,
     )
@@ -608,19 +314,19 @@ async fn classify_screen_apple(
     parse_classification(&raw)
 }
 
-async fn generate_commentary_apple(
+async fn generate_commentary(
     screen_text: &str,
     context: &str,
     recent_journal: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let weather_ctx = crate::weather::get_weather_context().await;
     let system_prompt = personality::get_system_prompt(recent_journal, &weather_ctx);
-    let screen_text = crate::apple_ai::truncate_utf8(screen_text, APPLE_OCR_BUDGET);
+    let screen_text = apple_ai::truncate_utf8(screen_text, OCR_BUDGET);
     let prompt = format!(
         "Context: {}\n\nText visible on the screen (OCR):\n{}\n\n{}",
         context, screen_text, COMMENTARY_PROMPT
     );
-    crate::apple_ai::generate(&system_prompt, &prompt).await
+    apple_ai::generate(&system_prompt, &prompt).await
 }
 
 // ─── Chat (text-only, for conversation mode) ────────────────────────────────
@@ -629,20 +335,11 @@ pub async fn chat_with_sheep(
     app: &tauri::AppHandle,
     user_message: &str,
 ) -> Result<CommentaryEvent, Box<dyn std::error::Error + Send + Sync>> {
-    let provider = get_provider().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
     let recent_context = memory::get_recent_context().unwrap_or_default();
     let weather_ctx = crate::weather::get_weather_context().await;
     let system_prompt = personality::get_chat_prompt(&recent_context, &weather_ctx);
 
-    let raw_response = match &provider {
-        AiProvider::Anthropic { api_key } => {
-            chat_anthropic(api_key, &system_prompt, user_message).await?
-        }
-        AiProvider::LmStudio { endpoint, model } => {
-            chat_openai(endpoint, model, &system_prompt, user_message).await?
-        }
-        AiProvider::Apple => crate::apple_ai::generate(&system_prompt, user_message).await?,
-    };
+    let raw_response = apple_ai::generate(&system_prompt, user_message).await?;
 
     eprintln!("[co-sheep] Chat raw response: {}", raw_response);
     let parsed = parse_commentary_response(&raw_response);
@@ -668,80 +365,6 @@ pub async fn chat_with_sheep(
     Ok(parsed.event)
 }
 
-async fn chat_anthropic(
-    api_key: &str,
-    system_prompt: &str,
-    user_message: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-    let body = serde_json::json!({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 256,
-        "system": system_prompt,
-        "messages": [{
-            "role": "user",
-            "content": user_message
-        }]
-    });
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("Chat API error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = resp_json["content"][0]["text"]
-        .as_str()
-        .ok_or("No text in chat response")?
-        .to_string();
-    Ok(text)
-}
-
-async fn chat_openai(
-    endpoint: &str,
-    model: &str,
-    system_prompt: &str,
-    user_message: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", endpoint);
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": format!("{} /no_think", user_message) }
-        ]
-    });
-
-    let resp = client
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!("Chat LM Studio error ({}): {}", status, body_text).into());
-    }
-
-    let resp_json: serde_json::Value = resp.json().await?;
-    let text = extract_openai_text(&resp_json)?;
-    Ok(text.to_string())
-}
-
 // ─── Friend-to-friend AI chat ────────────────────────────────────────────────
 
 pub async fn friend_chat(
@@ -750,8 +373,7 @@ pub async fn friend_chat(
     friend_b_name: &str,
     friend_b_personality: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let provider = get_provider().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
-    let language = onboarding::get_language();
+    let language = crate::onboarding::get_language();
 
     let system_prompt = format!(
         r#"You are writing a short conversation between two desktop sheep friends.
@@ -773,15 +395,7 @@ Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null"#,
 
     let user_msg = format!("Generate a conversation between {} and {}.", friend_a_name, friend_b_name);
 
-    let raw = match &provider {
-        AiProvider::Anthropic { api_key } => {
-            chat_anthropic(api_key, &system_prompt, &user_msg).await?
-        }
-        AiProvider::LmStudio { endpoint, model } => {
-            chat_openai(endpoint, model, &system_prompt, &user_msg).await?
-        }
-        AiProvider::Apple => crate::apple_ai::generate(&system_prompt, &user_msg).await?,
-    };
+    let raw = apple_ai::generate(&system_prompt, &user_msg).await?;
 
     eprintln!("[co-sheep] Friend chat raw: {}", raw);
     Ok(raw)
@@ -789,82 +403,16 @@ Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null"#,
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
-const CLASSIFY_PROMPT: &str = "Classify this screenshot. What app/website is active? Is anything notable happening (errors, code bugs, social media doom-scrolling, idle desktop, interesting content)?\n\nReply ONLY with JSON, no markdown: {\"interesting\": true/false, \"category\": \"string\", \"summary\": \"brief description\"}\n\nMark as interesting if: code with errors, social media scrolling, gaming, unusual content, embarrassing tabs. Mark as NOT interesting if: normal coding, idle desktop, standard productivity work.";
-
-const COMMENTARY_PROMPT: &str = "Give a short snarky comment (1-2 sentences max) about what you see on this screen. Stay in character. Reference past observations if relevant. Reply with JSON: {\"text\": \"your comment\", \"animation\": \"name_or_null\"}";
-
-/// Strip `<think>...</think>` reasoning blocks that reasoning models (Qwen3.5, etc.) emit.
-fn strip_think_blocks(text: &str) -> &str {
-    // Find the last </think> and take everything after it
-    if let Some(pos) = text.rfind("</think>") {
-        text[pos + 8..].trim()
-    } else {
-        text
-    }
-}
-
-fn extract_openai_text(resp: &serde_json::Value) -> Result<&str, Box<dyn std::error::Error + Send + Sync>> {
-    resp["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or_else(|| "No text in OpenAI-compatible response".into())
-}
-
-fn parse_classification(text: &str) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
-    let cleaned = strip_think_blocks(text);
-    let json_str = cleaned
+fn parse_classification(text: &str) -> Result<ScreenClassification, Box<dyn std::error::Error + Send + Sync>> {
+    let json_str = text
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
 
-    let classification: HaikuClassification = serde_json::from_str(json_str)
+    let classification: ScreenClassification = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse classification: {} — raw: {}", e, json_str))?;
 
     Ok(classification)
-}
-
-/// Dispatch to the correct backend
-async fn classify_screen(
-    provider: &AiProvider,
-    screenshot_b64: &str,
-    screen_text: Option<&str>,
-) -> Result<HaikuClassification, Box<dyn std::error::Error + Send + Sync>> {
-    match provider {
-        AiProvider::Anthropic { api_key } => {
-            classify_screen_anthropic(api_key, screenshot_b64).await
-        }
-        AiProvider::LmStudio { endpoint, model } => {
-            classify_screen_openai(endpoint, model, screenshot_b64).await
-        }
-        AiProvider::Apple => {
-            classify_screen_apple(screen_text.ok_or("Apple provider requires OCR text")?).await
-        }
-    }
-}
-
-async fn generate_commentary(
-    provider: &AiProvider,
-    screenshot_b64: &str,
-    screen_text: Option<&str>,
-    context: &str,
-    recent_journal: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    match provider {
-        AiProvider::Anthropic { api_key } => {
-            generate_commentary_anthropic(api_key, screenshot_b64, context, recent_journal).await
-        }
-        AiProvider::LmStudio { endpoint, model } => {
-            generate_commentary_openai(endpoint, model, screenshot_b64, context, recent_journal)
-                .await
-        }
-        AiProvider::Apple => {
-            generate_commentary_apple(
-                screen_text.ok_or("Apple provider requires OCR text")?,
-                context,
-                recent_journal,
-            )
-            .await
-        }
-    }
 }
