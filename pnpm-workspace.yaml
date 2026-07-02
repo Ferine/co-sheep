@@ -1,0 +1,19 @@
+packages:
+  - "."
+
+# --- Supply-chain hardening (pnpm v11) ---
+
+# Refuse to resolve package versions younger than 7 days.
+# Malicious releases are usually detected and pulled within hours.
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude: []
+
+# Block all dependency lifecycle scripts (postinstall etc.).
+# Add packages here explicitly if a native build is genuinely required.
+# esbuild: false — its postinstall only optimizes binary lookup; the real
+# binary ships via the @esbuild/darwin-arm64 optionalDependency.
+allowBuilds:
+  esbuild: false
+
+# New `pnpm add` entries are saved as exact versions (no ^/~)
+savePrefix: ""

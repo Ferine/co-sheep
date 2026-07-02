@@ -1,7 +1,7 @@
 #!/bin/sh
 # Compiles the Apple Intelligence sidecar (src-tauri/helper/apple-ai-helper.swift)
 # into src-tauri/binaries/ with the target-triple suffix Tauri expects for
-# externalBin. Runs as part of `npm run build:tauri` and `npm run dev`.
+# externalBin. Runs as part of `pnpm run build:tauri` and `pnpm run dev`.
 #
 # The helper compiles with any recent Xcode; the on-device model itself needs
 # the macOS 26 SDK (Xcode 26+) — older toolchains produce a helper that

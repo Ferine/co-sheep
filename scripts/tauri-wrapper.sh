@@ -20,4 +20,4 @@ if [ "$HAS_BUNDLES" -eq 1 ]; then
 fi
 
 tauri build "$@"
-npm run bundle:dmg
+pnpm run bundle:dmg

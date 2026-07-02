@@ -5,7 +5,7 @@ fn main() {
 
 /// tauri-build requires every externalBin to exist for the host triple at
 /// compile time. On macOS the real apple-ai-helper is compiled first by
-/// `npm run build:helper`; for bare `cargo check`/`cargo build` and
+/// `pnpm run build:helper`; for bare `cargo check`/`cargo build` and
 /// non-macOS platforms, drop in an empty placeholder so the build works.
 fn ensure_sidecar_placeholder() {
     let triple = std::env::var("TARGET").unwrap_or_default();

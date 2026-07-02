@@ -120,7 +120,7 @@ Available from the tray icon and macOS menu bar:
 ## Requirements
 
 - macOS (uses CoreGraphics for cursor tracking and screen capture)
-- [Node.js](https://nodejs.org/) (v18+)
+- [Node.js](https://nodejs.org/) (v22+) with [pnpm](https://pnpm.io/) v11 (`corepack enable` picks the pinned version automatically)
 - [Rust](https://rustup.rs/) (stable)
 - macOS 26+ (Tahoe) on Apple Silicon with Apple Intelligence enabled — the AI runs entirely on-device
 - Xcode 26+ (for the FoundationModels SDK used by the bundled helper)
@@ -129,13 +129,13 @@ Available from the tray icon and macOS menu bar:
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Run in development
-npm run tauri dev
+pnpm tauri dev
 
 # Build for production
-npm run tauri build
+pnpm tauri build
 ```
 
 The `.app` bundle will be at `src-tauri/target/release/bundle/macos/co-sheep.app`.
@@ -217,7 +217,7 @@ co-sheep/
 
 ## Cost & privacy
 
-Zero API cost — everything runs on Apple's on-device foundation model. Your screen content never leaves your Mac: Apple's model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) rather than the actual pixels. The helper binary that bridges to the FoundationModels framework is built automatically by `npm run build:tauri` (requires Xcode 26+; older Xcode builds a stub that reports the AI as unavailable).
+Zero API cost — everything runs on Apple's on-device foundation model. Your screen content never leaves your Mac: Apple's model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) rather than the actual pixels. The helper binary that bridges to the FoundationModels framework is built automatically by `pnpm run build:tauri` (requires Xcode 26+; older Xcode builds a stub that reports the AI as unavailable).
 
 ## License
 
