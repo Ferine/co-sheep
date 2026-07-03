@@ -15,7 +15,7 @@ A desktop companion sheep that watches your screen and delivers snarky commentar
 - **Pass 1**: cheap classification — is anything interesting happening?
 - **Pass 2**: commentary with expressive animations — only when warranted
 - The sheep forms persistent opinions about you that grow stronger over time
-- It keeps daily tallies ("that's the 5th time on Twitter today") and a markdown diary
+- It keeps daily tallies ("that's the 5th time on Twitter today"), tracks which apps you actually use, and writes a markdown diary
 - You can drag it, pet it, double-click it, or drop files on it
 - **Friends** with distinct personalities roam your desktop, chat with each other, and react to what's happening
 
@@ -65,6 +65,17 @@ The "Friend Relationships" viewer shows an affinity matrix, per-friend stats, an
 - **Night mode** (8pm–6am) — twinkling stars, moonlight glow, fireflies near idle sheep, enhanced campfire glow
 - **Weather** — set a city in settings and see rain or snow particles on screen; the AI references weather in commentary
 - **Break reminders** — after 45 min of continuous work, the sheep nudges you to take a break (personality-flavored)
+
+## Living Desktop
+
+The flock runs a social simulation — drama emerges from real relationship data, not scripts:
+
+- **Drama engine** — relationships move through `neutral → warm → inseparable` or `tension → feud → reconciling` based on affinity, moods, and jealousy (pet one sheep too much and the others notice). Feuding sheep refuse group activities, storm apart, and snipe at each other; a mutual friend eventually attempts mediation.
+- **Spectacles** — rare desktop events (~at most one a day, guaranteed within three): a wolf scatters the flock, a UFO abducts someone, a traveling merchant gifts an accessory, a balloon drifts by, shearing day embarrasses everyone. Long feuds can erupt into a high-noon showdown; reconciliations end in a feast.
+- **App awareness** — the sheep see which app is frontmost (name only, no extra permissions, no AI calls) and react: instant quips on app switches, gossip about your measured habits ("Hour 3 in the terminal. Blink twice if you need help."), and break reminders that name the culprit app.
+- **Debug menu** — tray → Debug lets you summon any spectacle or force a feud on demand.
+
+Drama state persists in `~/.co-sheep/drama.json`; spectacle timing in `~/.co-sheep/spectacles.json`.
 
 ## Animations
 
