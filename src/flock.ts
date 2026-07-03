@@ -10,6 +10,7 @@ import { EasterHuntSummary, GroupActivity, canStartGroupActivity, createGroupAct
 import { EasterStatsSnapshot, EasterTheme } from "./easter-theme";
 import { SummerTheme, SUMMER_IDLE_QUIPS } from "./summer-theme";
 import { invoke } from "@tauri-apps/api/core";
+import { bus } from "./events";
 
 const GOOD_COLLEAGUE_QUIPS = [
   "No blir det liv rai rai",
@@ -196,6 +197,9 @@ export class Flock {
   /** Callback set by main.ts when break reminder fires */
   onBreakReminderFired: (() => void) | null = null;
 
+  /** Installed by DramaManager: filters group-activity participant lists (drops feuders). */
+  participantFilter: ((ids: string[]) => string[]) | null = null;
+
   constructor(screenWidth: number, screenHeight: number) {
     this.screenWidth = screenWidth;
     this.screenHeight = screenHeight;
@@ -219,6 +223,7 @@ export class Flock {
       this.main.playAnimation(anim);
       // Friends react to AI commentary
       this.triggerFriendReactions("commentary");
+      bus.emit("ai-commentary", { animation: anim });
     };
 
     // Spawn Good Colleague after a short delay
@@ -326,6 +331,40 @@ export class Flock {
       return entry.quips[Math.floor(Math.random() * entry.quips.length)];
     }
     return sheep.getRandomQuip();
+  }
+
+  /** All character ids: "main" + every friend (incl. good_colleague). */
+  getCharacterIds(): string[] {
+    return ["main", ...this.friends.keys()];
+  }
+
+  /** Public lookup for other systems (drama, spectacles, gossip). */
+  getCharacter(id: string): { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null {
+    return this.getSheepById(id);
+  }
+
+  isCharacterCalm(id: string): boolean {
+    const c = this.getSheepById(id);
+    return c ? this.isCalm(c.sheep.state) : false;
+  }
+
+  /**
+   * Play a prepared script through the normal conversation machinery.
+   * Refuses (returns false) if the stage is already busy.
+   */
+  startScriptedConversation(script: ConversationScript, participants: string[]): boolean {
+    if (this.activeConversation || this.groupActivity || script.length === 0) return false;
+    for (const id of participants) {
+      const c = this.getSheepById(id);
+      if (!c || !this.isCalm(c.sheep.state) || c.bubble.visible) return false;
+    }
+    this.activeConversation = {
+      lines: script,
+      currentIndex: 0,
+      timer: 0,
+      participants: new Set(participants),
+    };
+    return true;
   }
 
   /** Trigger stampede — all sheep scatter in panic */
@@ -502,6 +541,7 @@ export class Flock {
     this.summerTheme.setWeather(c, tempC);
     if (c && c !== prev) {
       this.triggerFriendReactions("weather");
+      bus.emit("weather-changed", { condition: c });
     }
   }
 
@@ -653,8 +693,12 @@ export class Flock {
       sheepList.push({ id, x: entry.sheep.x, calm: this.isCalm(entry.sheep.state) });
     }
 
-    const participants = canStartGroupActivity(sheepList);
+    let participants = canStartGroupActivity(sheepList);
     if (!participants) return;
+    if (this.participantFilter) {
+      participants = this.participantFilter(participants);
+      if (participants.length < 3) return; // feud thinned the group below viability
+    }
 
     // Calculate center of participants
     let sumX = 0;
@@ -825,6 +869,10 @@ export class Flock {
         participants: this.groupActivity.participants,
         activityType: this.groupActivity.type,
       }).catch(() => {});
+      bus.emit("group-activity", {
+        type: this.groupActivity.type,
+        participants: this.groupActivity.participants,
+      });
     }
 
     // Release participants from activity-driven states so they don't keep walking toward stale targets
@@ -855,6 +903,7 @@ export class Flock {
           const topic = conv.lines[0]?.text.slice(0, 30) ?? "something";
           if (pIds.length === 2) {
             invoke("record_friend_conversation", { idA: pIds[0], idB: pIds[1], topic }).catch(() => {});
+            bus.emit("conversation-happened", { idA: pIds[0], idB: pIds[1], topic });
           }
           this.activeConversation = null;
           this.conversationCooldown = 180000 + Math.random() * 120000;
