@@ -10,6 +10,15 @@ const DOCK_MARGIN = 80; // stay above macOS Dock
 const ZOOM_SPEED = 600; // px/sec
 const BORED_THRESHOLD = 120000; // 2 minutes until bored idle behaviors
 
+// States safe to interrupt when the sheep should sit and listen to the
+// human. Physics states (grabbed, parachute, fall, trampoline, stampede,
+// stacked) and reply animations play out first, then park on landing.
+const LISTENING_PARKABLE: SheepState[] = [
+  "idle", "walk", "sit", "sleep",
+  "idle_sleep", "idle_campfire", "idle_counting", "idle_judging",
+  "idle_hearts", "idle_zooming", "idle_sighing", "idle_egg_painting",
+];
+
 export type DrawOverlay = (
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -144,6 +153,21 @@ export class Sheep {
 
   private isBored(): boolean {
     return Date.now() - this.lastActivityTime > BORED_THRESHOLD;
+  }
+
+  private listening = false;
+
+  /** Park the sheep while the human is chatting — it stops and listens. */
+  startListening() {
+    this.listening = true;
+    this.resetActivity();
+  }
+
+  stopListening() {
+    this.listening = false;
+    if (this.state === "sit") {
+      this.setState("idle", 1000 + Math.random() * 2000);
+    }
   }
 
   /** Trigger a named animation. Interrupts idle/walk/sit but not grabbed. */
@@ -366,6 +390,12 @@ export class Sheep {
     const currentSprite = this.sprites[spriteKey];
     if (currentSprite) currentSprite.update(dt);
 
+    // While the human is chatting, park in "sit" once any physics state
+    // or reply animation has finished
+    if (this.listening && this.state !== "sit" && LISTENING_PARKABLE.includes(this.state)) {
+      this.setState("sit", 0);
+    }
+
     switch (this.state) {
       case "parachute":
         this.updateParachute(dt);
@@ -377,7 +407,7 @@ export class Sheep {
         this.updateWalk(dt);
         break;
       case "sit":
-        this.updateSit();
+        if (!this.listening) this.updateSit();
         break;
       case "sleep":
         this.updateSleep();
