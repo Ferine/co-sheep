@@ -6,6 +6,7 @@ import {
   evaluateDrama,
   pairKey,
   blocksGroupActivity,
+  pruneCharacterFromPairs,
 } from "./drama";
 
 function pair(overrides: Partial<PairInput>): PairInput {
@@ -117,5 +118,30 @@ describe("blocksGroupActivity", () => {
     expect(blocksGroupActivity("feud")).toBe(true);
     expect(blocksGroupActivity("tension")).toBe(false);
     expect(blocksGroupActivity("warm")).toBe(false);
+  });
+});
+
+describe("pruneCharacterFromPairs", () => {
+  const pairs = {
+    [pairKey("main", "friend_1")]: { state: "feud", since: 100 },
+    [pairKey("friend_1", "friend_2")]: { state: "warm", since: 200 },
+    [pairKey("main", "friend_2")]: { state: "neutral", since: 300 },
+  };
+
+  it("removes every pair involving the departed character", () => {
+    const out = pruneCharacterFromPairs(pairs, "friend_1");
+    expect(Object.keys(out)).toEqual([pairKey("main", "friend_2")]);
+    expect(out[pairKey("main", "friend_2")]).toEqual({ state: "neutral", since: 300 });
+  });
+
+  it("returns pairs unchanged for an unknown id", () => {
+    expect(pruneCharacterFromPairs(pairs, "friend_99")).toEqual(pairs);
+  });
+
+  it("does not prune on partial id matches", () => {
+    const p = { [pairKey("friend_1", "friend_12")]: { state: "warm", since: 1 } };
+    expect(pruneCharacterFromPairs(p, "friend_1")).toEqual({});
+    expect(pruneCharacterFromPairs(p, "friend_12")).toEqual({});
+    expect(Object.keys(pruneCharacterFromPairs(p, "friend_"))).toHaveLength(1);
   });
 });

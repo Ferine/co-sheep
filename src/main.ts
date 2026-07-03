@@ -324,6 +324,7 @@ async function init() {
 
   listen<string>("remove-friend", (event) => {
     flock.removeFriend(event.payload);
+    dramaManager.onFriendRemoved(event.payload);
   });
 
   listen<{

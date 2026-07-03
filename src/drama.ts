@@ -59,6 +59,21 @@ export function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+/** Drop every pair record involving a departed character. Ids never come
+ * back (they're timestamped), so their pairs would otherwise live in
+ * drama.json forever. */
+export function pruneCharacterFromPairs<T>(
+  pairs: Record<string, T>,
+  id: string,
+): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [key, rec] of Object.entries(pairs)) {
+    const [a, b] = key.split("|");
+    if (a !== id && b !== id) out[key] = rec;
+  }
+  return out;
+}
+
 export function blocksGroupActivity(state: RelationshipState): boolean {
   return state === "feud";
 }

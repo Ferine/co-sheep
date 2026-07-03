@@ -8,6 +8,7 @@ import {
   blocksGroupActivity,
   evaluateDrama,
   pairKey,
+  pruneCharacterFromPairs,
 } from "./drama";
 import { DramaScriptKind, pickDramaScript } from "./drama-scripts";
 import { ConversationScript, SheepAnimation } from "./types";
@@ -73,6 +74,15 @@ export class DramaManager {
     setInterval(() => {
       this.tick().catch((e) => console.error("[co-sheep] drama tick failed:", e));
     }, TICK_MS);
+  }
+
+  /** A friend was removed — its id never returns, so drop its drama state.
+   * Called from the remove-friend event, NOT the tick: friends spawn
+   * staggered at startup, so pruning against live ids would eat real feuds. */
+  onFriendRemoved(id: string): void {
+    this.state.pairs = pruneCharacterFromPairs(this.state.pairs, id);
+    delete this.state.pettingToday[id];
+    this.persist();
   }
 
   getPairStates(): Record<string, { state: RelationshipState; sinceMs: number }> {

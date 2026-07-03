@@ -252,7 +252,15 @@ async fn add_friend(app: tauri::AppHandle, name: String, color: String, personal
     );
     let scale = 0.85 + (rand_f64() * 0.3); // 0.85–1.15
     let mut id = base_id.clone();
+    let mut at_capacity = false;
     onboarding::update_config(|config| {
+        // The friends UI disables its button at 4, but the flock also hard
+        // caps at 5 sheep (4 + Good Colleague) — enforce here so config
+        // can't silently hold friends that never spawn
+        if config.friends.len() >= 4 {
+            at_capacity = true;
+            return;
+        }
         // Two adds in the same millisecond would otherwise share an id
         // (and thus a brain file)
         let mut suffix = 1;
@@ -270,6 +278,9 @@ async fn add_friend(app: tauri::AppHandle, name: String, color: String, personal
         });
     })
     .map_err(|e| e.to_string())?;
+    if at_capacity {
+        return Err("Max 4 friends — the desktop only fits so much wool.".to_string());
+    }
     friend_memory::ensure_brain(&id, &name);
     app.emit(
         "add-friend",
@@ -313,6 +324,9 @@ async fn save_friend_accessories(app: tauri::AppHandle, id: String, accessories:
 async fn remove_friend(app: tauri::AppHandle, id: String) -> Result<(), String> {
     onboarding::update_config(|config| config.friends.retain(|f| f.id != id))
         .map_err(|e| e.to_string())?;
+    // Delete the brain and scrub the id from every remaining brain — or the
+    // Relationships viewer shows ghosts and affinity maps rot forever
+    friend_memory::remove_brain(&id);
     app.emit("remove-friend", &id)
         .map_err(|e| e.to_string())?;
     eprintln!("[co-sheep] Removed friend: {}", id);

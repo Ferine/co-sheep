@@ -44,6 +44,10 @@ static LAST_DECAY_DATE: LazyLock<Mutex<String>> =
     LazyLock::new(|| Mutex::new(String::new()));
 
 fn friends_dir() -> PathBuf {
+    // Overridable so tests can run against a temp dir instead of real data
+    if let Ok(dir) = std::env::var("CO_SHEEP_HOME") {
+        return PathBuf::from(dir).join("friends");
+    }
     let home = dirs::home_dir().expect("No home directory");
     home.join(".co-sheep").join("friends")
 }
@@ -204,6 +208,32 @@ pub fn record_pet(id: &str) {
     save_brain(&brain);
 }
 
+/// A friend was removed: delete its brain, evict it from the cache (or the
+/// Relationships viewer shows a ghost until restart), and scrub its id from
+/// every remaining brain's relationships map. Memories that mention it are
+/// kept on purpose — the flock remembers the departed.
+pub fn remove_brain(id: &str) {
+    fs::remove_file(friend_path(id)).ok();
+    CACHE.lock().unwrap().remove(id);
+
+    let Ok(entries) = fs::read_dir(friends_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(other_id) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if other_id == id {
+            continue;
+        }
+        let mut brain = load_brain(other_id);
+        if brain.relationships.remove(id).is_some() {
+            save_brain(&brain);
+        }
+    }
+}
+
 pub fn get_affinity(id_a: &str, id_b: &str) -> i32 {
     let brain = load_brain(id_a);
     brain.relationships.get(id_b).copied().unwrap_or(0)
@@ -349,4 +379,50 @@ pub fn get_friend_context(id: &str) -> String {
     ));
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One test covering the whole removal scenario — the brain CACHE and
+    /// CO_SHEEP_HOME are process-global, so splitting this into multiple
+    /// parallel tests would race.
+    #[test]
+    fn remove_brain_deletes_file_and_scrubs_relationships() {
+        let tmp = std::env::temp_dir().join(format!("co-sheep-test-{}", std::process::id()));
+        std::env::set_var("CO_SHEEP_HOME", &tmp);
+
+        ensure_brain("friend_a", "A");
+        ensure_brain("friend_b", "B");
+        record_conversation("friend_a", "friend_b", "tabs vs spaces");
+
+        assert!(friend_path("friend_a").exists());
+        assert!(get_friend_brain_json("friend_b")["relationships"]
+            .get("friend_a")
+            .is_some());
+
+        remove_brain("friend_a");
+
+        assert!(!friend_path("friend_a").exists(), "brain file must be deleted");
+        assert!(
+            !CACHE.lock().unwrap().contains_key("friend_a"),
+            "cache must evict the removed brain"
+        );
+        assert!(
+            get_friend_brain_json("friend_b")["relationships"]
+                .get("friend_a")
+                .is_none(),
+            "other brains must be scrubbed"
+        );
+        // Scrub must persist, not just touch the cache. Memories still
+        // mention the departed friend by design — only relationships scrub.
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(friend_path("friend_b")).unwrap())
+                .unwrap();
+        assert!(on_disk["relationships"].get("friend_a").is_none());
+        assert!(on_disk["memories"][0]["with"].as_str() == Some("friend_a"));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }
