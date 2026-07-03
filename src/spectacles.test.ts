@@ -86,6 +86,25 @@ describe("pickRandomSpectacle", () => {
     state = { ...state, lastFiredMs: nowMs - SPECTACLE.PITY_MS - 1 };
     expect(pickRandomSpectacle({ state, nowMs, isNight: false, rand: 0 })).toBeNull();
   });
+
+  it("weighted pick spans the table across the surviving rand range", () => {
+    const state = { ...fresh(), lastFiredMs: 100 * DAY };
+    const nowMs = 100 * DAY + SPECTACLE.MIN_GAP_MS + 1;
+    // rand just under the gate → renormalized near 1 → last table entry
+    const high = pickRandomSpectacle({ state, nowMs, isNight: false, rand: SPECTACLE.TICK_CHANCE * 0.999 });
+    expect(high).toBe("shearing");
+    // rand near 0 → first table entry
+    const low = pickRandomSpectacle({ state, nowMs, isNight: false, rand: 0.0000001 });
+    expect(low).toBe("wolf");
+  });
+
+  it("mid-range surviving rand picks a middle table entry", () => {
+    const state = { ...fresh(), lastFiredMs: 100 * DAY };
+    const nowMs = 100 * DAY + SPECTACLE.MIN_GAP_MS + 1;
+    // renormalized ≈ 0.45 → roll ≈ 4.5 of 10 → second entry (ufo: wolf covers [0,3))
+    const mid = pickRandomSpectacle({ state, nowMs, isNight: false, rand: SPECTACLE.TICK_CHANCE * 0.45 });
+    expect(mid).toBe("ufo");
+  });
 });
 
 describe("markFired", () => {

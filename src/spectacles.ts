@@ -54,6 +54,11 @@ export function pickRandomSpectacle(input: SchedulerInput): SpectacleType | null
   const pityDue = nowMs - state.lastFiredMs >= SPECTACLE.PITY_MS;
   if (!pityDue && rand >= SPECTACLE.TICK_CHANCE) return null;
 
+  // The gate consumed rand's magnitude: on the non-pity path only
+  // rand < TICK_CHANCE survives, so rescale it back to [0,1) or the
+  // weighted walk below would always land on the first entry.
+  const pickRand = pityDue ? rand : rand / SPECTACLE.TICK_CHANCE;
+
   const eligible = RANDOM_TABLE.filter(({ type }) => {
     const last = state.lastByType[type];
     return last === undefined || nowMs - last >= SPECTACLE.TYPE_COOLDOWN_MS;
@@ -61,7 +66,7 @@ export function pickRandomSpectacle(input: SchedulerInput): SpectacleType | null
   if (eligible.length === 0) return null;
 
   const totalWeight = eligible.reduce((s, e) => s + e.weight, 0);
-  let roll = rand * totalWeight;
+  let roll = pickRand * totalWeight;
   for (const e of eligible) {
     roll -= e.weight;
     if (roll < 0) return e.type;
