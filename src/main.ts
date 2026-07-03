@@ -7,9 +7,12 @@ import { BreakReminder } from "./break-reminder";
 import { createCompositeOverlay } from "./accessories";
 import { FriendConfig } from "./types";
 import { EasterStatsSnapshot } from "./easter-theme";
+import { bus } from "./events";
+import { DramaManager } from "./drama-manager";
 import "./styles.css";
 
 let flock: Flock;
+let dramaManager: DramaManager;
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
 let lastTime = 0;
@@ -56,6 +59,9 @@ async function init() {
 
   flock = new Flock(canvas.width, canvas.height);
   console.log("[co-sheep] Flock created with main sheep + Good Colleague");
+
+  dramaManager = new DramaManager(flock);
+  dramaManager.start();
 
   // Load settings (personality, break reminders, accessories)
   try {
@@ -189,6 +195,7 @@ async function init() {
         const bubble = flock.getBubble(target);
         bubble.show("Zzzz... don't stop...", 3000);
         invoke("record_interaction", { interaction: `petted ${target.id}` });
+        bus.emit("sheep-petted", { id: target.id });
         if (target.id !== "main") {
           invoke("record_friend_pet", { id: target.id }).catch(() => {});
         }

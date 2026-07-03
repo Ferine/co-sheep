@@ -534,9 +534,10 @@ async fn friend_ai_chat(
     friend_a_personality: String,
     friend_b_name: String,
     friend_b_personality: String,
+    topic: Option<String>,
 ) -> Result<String, String> {
     eprintln!("[co-sheep] Friend AI chat: {} ({}) <-> {} ({})", friend_a_name, friend_a_personality, friend_b_name, friend_b_personality);
-    vision::friend_chat(&friend_a_name, &friend_a_personality, &friend_b_name, &friend_b_personality)
+    vision::friend_chat(&friend_a_name, &friend_a_personality, &friend_b_name, &friend_b_personality, topic.as_deref())
         .await
         .map_err(|e| e.to_string())
 }

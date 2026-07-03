@@ -372,6 +372,7 @@ pub async fn friend_chat(
     friend_a_personality: &str,
     friend_b_name: &str,
     friend_b_personality: &str,
+    topic: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let language = crate::onboarding::get_language();
 
@@ -393,7 +394,16 @@ Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null"#,
         lang = language,
     );
 
-    let user_msg = format!("Generate a conversation between {} and {}.", friend_a_name, friend_b_name);
+    let user_msg = match topic {
+        Some(t) => format!(
+            "Generate a conversation between {} and {}. Context: {}",
+            friend_a_name, friend_b_name, t
+        ),
+        None => format!(
+            "Generate a conversation between {} and {}.",
+            friend_a_name, friend_b_name
+        ),
+    };
 
     let raw = apple_ai::generate(&system_prompt, &user_msg).await?;
 
