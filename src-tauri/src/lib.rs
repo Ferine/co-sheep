@@ -3,6 +3,7 @@ mod capture;
 mod cursor;
 mod easter_memory;
 mod friend_memory;
+mod living_state;
 mod memory;
 mod onboarding;
 mod permissions;
@@ -468,6 +469,27 @@ fn record_group_activity(participants: Vec<String>, activity_type: String) {
 }
 
 #[tauri::command]
+fn get_living_state(name: String) -> serde_json::Value {
+    living_state::load_state(&name)
+}
+
+#[tauri::command]
+fn save_living_state(name: String, value: serde_json::Value) {
+    living_state::save_state(&name, &value);
+}
+
+/// Record a spectacle's aftermath: friend memories + affinity boost + diary entry.
+#[tauri::command]
+fn record_spectacle(kind: String, participants: Vec<String>) {
+    friend_memory::record_group_activity(&participants, &kind);
+    memory::append_journal(&format!(
+        "*A {} happened on the desktop! The flock is still talking about it.*",
+        kind
+    ))
+    .ok();
+}
+
+#[tauri::command]
 fn record_friend_pet(id: String) {
     friend_memory::record_pet(&id);
 }
@@ -572,6 +594,9 @@ pub fn run() {
             get_easter_stats,
             record_easter_hunt,
             open_friend_memory_window,
+            get_living_state,
+            save_living_state,
+            record_spectacle,
         ])
         .setup(|app| {
             eprintln!("[co-sheep] === co-sheep starting ===");
