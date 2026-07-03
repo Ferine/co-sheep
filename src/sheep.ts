@@ -157,6 +157,11 @@ export class Sheep {
 
   private listening = false;
 
+  /** True while the human has this sheep's chat open — pickers must not disturb it. */
+  get isListening(): boolean {
+    return this.listening;
+  }
+
   /** Park the sheep while the human is chatting — it stops and listens. */
   startListening() {
     this.listening = true;

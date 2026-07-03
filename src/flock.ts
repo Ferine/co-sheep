@@ -226,12 +226,7 @@ export class Flock {
     // Wire AI commentary animations to main sheep
     this.mainBubble.onAnimation = (anim) => {
       console.log("[co-sheep] Triggering animation from AI:", anim);
-      this.cancelConversation(); // AI commentary takes priority
-      this.main.resetActivity();
-      this.main.playAnimation(anim);
-      // Friends react to AI commentary
-      this.triggerFriendReactions("commentary");
-      bus.emit("ai-commentary", { animation: anim });
+      this.onChatReply(anim);
     };
 
     // Spawn Good Colleague after a short delay
@@ -360,7 +355,7 @@ export class Flock {
 
   isCharacterCalm(id: string): boolean {
     const c = this.getSheepById(id);
-    return c ? this.isCalm(c.sheep.state) : false;
+    return c ? this.isCalm(c.sheep) : false;
   }
 
   /**
@@ -371,7 +366,7 @@ export class Flock {
     if (this.activeConversation || this.groupActivity || script.length === 0) return false;
     for (const id of participants) {
       const c = this.getSheepById(id);
-      if (!c || !this.isCalm(c.sheep.state) || c.bubble.visible) return false;
+      if (!c || !this.isCalm(c.sheep) || c.bubble.visible) return false;
     }
     this.activeConversation = {
       lines: script,
@@ -488,7 +483,7 @@ export class Flock {
     let count = 0;
     for (const entry of this.friends.values()) {
       if (count >= 2) break;
-      if (!this.isCalm(entry.sheep.state) || entry.bubble.visible) continue;
+      if (!this.isCalm(entry.sheep) || entry.bubble.visible) continue;
       if (entry.sheep === sheep) continue;
 
       const pool = TRAMPOLINE_REACTIONS[entry.personality] ?? TRAMPOLINE_REACTIONS.wholesome;
@@ -773,10 +768,10 @@ export class Flock {
     if (Math.random() > 0.001) return; // 0.1% per tick
 
     const sheepList: Array<{ id: string; x: number; calm: boolean }> = [
-      { id: "main", x: this.main.x, calm: this.isCalm(this.main.state) },
+      { id: "main", x: this.main.x, calm: this.isCalm(this.main) },
     ];
     for (const [id, entry] of this.friends) {
-      sheepList.push({ id, x: entry.sheep.x, calm: this.isCalm(entry.sheep.state) });
+      sheepList.push({ id, x: entry.sheep.x, calm: this.isCalm(entry.sheep) });
     }
 
     let participants = canStartGroupActivity(sheepList);
@@ -804,7 +799,7 @@ export class Flock {
     if (this.notificationCooldown > 0) return;
     // Find a calm friend to echo after 5s
     for (const entry of this.friends.values()) {
-      if (!this.isCalm(entry.sheep.state) || entry.bubble.visible) continue;
+      if (!this.isCalm(entry.sheep) || entry.bubble.visible) continue;
       const ECHO_MESSAGES: Record<FriendPersonality, string[]> = {
         wholesome: ["They're right! Take care of yourself!", "Please stretch! For me?"],
         chaotic: ["YEAH! STAND UP! DO A FLIP!", "BREAK TIME BREAK TIME!"],
@@ -858,7 +853,7 @@ export class Flock {
           "passive-aggressive": ["I'm sure working late is FINE.", "Don't mind the time. I won't."],
         };
         for (const entry of this.friends.values()) {
-          if (!this.isCalm(entry.sheep.state) || entry.bubble.visible) continue;
+          if (!this.isCalm(entry.sheep) || entry.bubble.visible) continue;
           const pool = NIGHT_MESSAGES[entry.personality] ?? NIGHT_MESSAGES.wholesome;
           entry.bubble.show(pool[Math.floor(Math.random() * pool.length)], 5000);
           this.notificationCooldown = 120000;
@@ -892,7 +887,7 @@ export class Flock {
     let count = 0;
     for (const entry of this.friends.values()) {
       if (count >= 2) break;
-      if (!this.isCalm(entry.sheep.state)) continue;
+      if (!this.isCalm(entry.sheep)) continue;
       if (entry.bubble.visible) continue;
       const dist = Math.abs(entry.sheep.x - this.main.x);
       if (dist > DISPLAY_SIZE * 3) continue;
@@ -918,7 +913,7 @@ export class Flock {
       if (entry.pendingReaction.delay <= 0) {
         const r = entry.pendingReaction;
         entry.pendingReaction = undefined;
-        if (!entry.bubble.visible && this.isCalm(entry.sheep.state)) {
+        if (!entry.bubble.visible && this.isCalm(entry.sheep)) {
           entry.bubble.show(r.text, 3000);
           if (r.animation) {
             entry.sheep.playAnimation(r.animation);
@@ -944,8 +939,11 @@ export class Flock {
     return null;
   }
 
-  private isCalm(state: SheepState): boolean {
-    return state === "idle" || state === "sit" || state === "walk";
+  private isCalm(sheep: Sheep): boolean {
+    // A listening sheep is parked in "sit" but is busy with the human —
+    // conversations, gossip, and group activities must leave it alone
+    if (sheep.isListening) return false;
+    return sheep.state === "idle" || sheep.state === "sit" || sheep.state === "walk";
   }
 
   private clearGroupActivity(cancelledEarly: boolean = false) {
@@ -1042,7 +1040,7 @@ export class Flock {
       for (let j = i + 1; j < allSheep.length; j++) {
         const a = allSheep[i];
         const b = allSheep[j];
-        if (!this.isCalm(a.sheep.state) || !this.isCalm(b.sheep.state)) continue;
+        if (!this.isCalm(a.sheep) || !this.isCalm(b.sheep)) continue;
         const dist = Math.abs(a.sheep.x - b.sheep.x);
         if (dist > DISPLAY_SIZE * 2) continue;
         if (a.bubble.visible || b.bubble.visible) continue;
@@ -1245,11 +1243,11 @@ export class Flock {
   private triggerStampedeDialogue() {
     // Find two calm sheep for a post-stampede conversation
     const calmSheep: Array<{ id: string; sheep: Sheep; bubble: SpeechBubble }> = [];
-    if (this.isCalm(this.main.state) && !this.mainBubble.visible) {
+    if (this.isCalm(this.main) && !this.mainBubble.visible) {
       calmSheep.push({ id: "main", sheep: this.main, bubble: this.mainBubble });
     }
     for (const [id, entry] of this.friends) {
-      if (this.isCalm(entry.sheep.state) && !entry.bubble.visible) {
+      if (this.isCalm(entry.sheep) && !entry.bubble.visible) {
         calmSheep.push({ id, sheep: entry.sheep, bubble: entry.bubble });
       }
     }
@@ -1279,7 +1277,7 @@ export class Flock {
       const second = calmSheep[1];
       second.sheep.resetActivity();
       setTimeout(() => {
-        if (this.isCalm(second.sheep.state)) {
+        if (this.isCalm(second.sheep)) {
           second.bubble.show(STAMPEDE_QUIPS_B[Math.floor(Math.random() * STAMPEDE_QUIPS_B.length)], 4000);
           second.sheep.playAnimation("headshake");
         }

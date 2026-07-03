@@ -6,6 +6,8 @@ export interface InputBubbleConfig {
   buttonText: string;
   onSubmit: (text: string) => Promise<void>;
   onClose?: () => void;
+  /** Return true to keep the bubble open for this outside-mousedown (e.g. a sheep grab). */
+  shouldIgnoreClickAway?: (e: MouseEvent) => boolean;
 }
 
 export class InputBubble {
@@ -70,9 +72,9 @@ export class InputBubble {
     // Click anywhere outside the bubble ends the conversation
     this.onDocMousedown = (e: MouseEvent) => {
       if (this.element.style.display === "none") return;
-      if (!this.element.contains(e.target as Node)) {
-        this.config.onClose?.();
-      }
+      if (this.element.contains(e.target as Node)) return;
+      if (this.config.shouldIgnoreClickAway?.(e)) return;
+      this.config.onClose?.();
     };
     document.addEventListener("mousedown", this.onDocMousedown);
   }
@@ -82,6 +84,7 @@ export class InputBubble {
     this.promptEl.style.display = "none";
     this.promptEl.classList.remove("input-bubble-loading");
     this.replyEl.style.display = "block";
+    this.replyEl.style.opacity = "1";
     this.replyEl.textContent = text;
     this.replyEl.classList.toggle("input-bubble-reply-error", isError);
     this.input.disabled = false;
@@ -109,6 +112,9 @@ export class InputBubble {
   setLoading(on: boolean) {
     this.input.disabled = on;
     this.button.disabled = on;
+    // The previous reply stays visible (it's the conversation context) but
+    // dims while the next one is being thought up
+    this.replyEl.style.opacity = on ? "0.5" : "1";
     if (on) {
       // showReply hides the prompt line — bring it back for "thinking..."
       this.promptEl.style.display = "block";

@@ -210,7 +210,9 @@ async function init() {
         hoverTimer = performance.now();
       } else if (
         performance.now() - hoverTimer > PET_THRESHOLD &&
-        target.state !== "petting"
+        target.state !== "petting" &&
+        // No petting the main sheep mid-conversation — it's listening
+        !(target.id === "main" && chatBubble)
       ) {
         target.startPetting();
         const bubble = flock.getBubble(target);
@@ -528,55 +530,71 @@ function drawBubbleShape(
   ctx.restore();
 }
 
-const CHAT_TIMEOUT_MS = 30_000;
+const CHAT_SLOW_MS = 30_000;
 
 function openChat() {
   if (chatBubble) return; // already open
 
   const transcript: ChatTurn[] = [];
-  let sendSeq = 0; // guards against stale replies after timeout/close
+  let sendSeq = 0; // a reply only renders if no newer message superseded it
+  let closed = false;
   flock.main.startListening();
+  // A sheep mid-petting when chat opens would loop hearts forever — end it
+  if (hoverTarget === flock.main) {
+    hoverTarget.stopPetting();
+    hoverTarget = null;
+  }
 
-  const closeChat = () => {
-    sendSeq++;
-    flock.main.stopListening();
-    chatBubble?.destroy();
-    chatBubble = null;
-  };
-
-  chatBubble = new InputBubble({
+  const bubble = new InputBubble({
     promptText: "Talk to me...",
     placeholder: "Say something...",
     buttonText: "Send",
     onSubmit: async (text) => {
-      if (!chatBubble) return;
+      if (closed) return;
       const seq = ++sendSeq;
-      chatBubble.setLoading(true);
+      bubble.setLoading(true);
       const history = capTranscript(transcript);
       transcript.push({ role: "human", text });
+      // Soft timeout: the backend can't cancel an in-flight model call, so
+      // warn and hand the input back — but keep waiting for the reply.
+      // Abandoning it would desync us from the journal the backend writes.
+      const slowTimer = setTimeout(() => {
+        if (seq === sendSeq && !closed) bubble.showReply("Zzz...", true);
+      }, CHAT_SLOW_MS);
       try {
-        const event = await Promise.race([
-          invoke<CommentaryEvent>("chat_with_sheep", { message: text, history }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject("Zzz..."), CHAT_TIMEOUT_MS),
-          ),
-        ]);
-        if (seq !== sendSeq || !chatBubble) return; // closed meanwhile
-        transcript.push({ role: "sheep", text: event.text });
-        chatBubble.showReply(event.text);
+        const event = await invoke<CommentaryEvent>("chat_with_sheep", { message: text, history });
+        clearTimeout(slowTimer);
+        if (seq !== sendSeq) return; // superseded by a newer message
+        if (closed) {
+          // Chat dismissed while thinking — deliver on the floating bubble
+          flock.mainBubble.show(event.text, 8000);
+        } else {
+          transcript.push({ role: "sheep", text: event.text });
+          bubble.showReply(event.text);
+        }
         flock.onChatReply(event.animation);
       } catch (e) {
+        clearTimeout(slowTimer);
         console.error("[co-sheep] Chat error:", e);
-        if (seq !== sendSeq || !chatBubble) return;
+        if (seq !== sendSeq || closed) return;
         // The model never answered — drop the turn so a retry isn't doubled
         if (transcript[transcript.length - 1]?.role === "human") transcript.pop();
-        chatBubble.showReply(typeof e === "string" ? e : "Baaaa... something broke.", true);
+        bubble.showReply(typeof e === "string" ? e : "Baaaa... something broke.", true);
       }
     },
-    onClose: closeChat,
+    onClose: () => {
+      closed = true;
+      flock.main.stopListening();
+      bubble.destroy();
+      if (chatBubble === bubble) chatBubble = null;
+    },
+    // A mousedown on a sheep is a grab, not a dismissal — dragging the
+    // sheep mid-conversation must not wipe the transcript
+    shouldIgnoreClickAway: (e) => flock.hitTest(e.clientX, e.clientY) !== null,
   });
-  chatBubble.show();
-  chatBubble.updatePosition(flock.main.x, flock.main.y, flock.main.displaySize);
+  chatBubble = bubble;
+  bubble.show();
+  bubble.updatePosition(flock.main.x, flock.main.y, flock.main.displaySize);
 }
 
 function gameLoop(timestamp: number) {

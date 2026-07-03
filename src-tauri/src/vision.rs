@@ -337,10 +337,15 @@ pub struct ChatTurn {
     pub text: String,
 }
 
+/// A pasted wall of text would blow the ~4k-token window — same guard the
+/// OCR path has via OCR_BUDGET.
+const CHAT_MSG_BUDGET: usize = 2000;
+
 pub async fn chat_with_sheep(
     user_message: &str,
     history: &[ChatTurn],
 ) -> Result<CommentaryEvent, Box<dyn std::error::Error + Send + Sync>> {
+    let user_message = apple_ai::truncate_utf8(user_message, CHAT_MSG_BUDGET);
     let recent_context = memory::get_recent_context().unwrap_or_default();
     let weather_ctx = crate::weather::get_weather_context().await;
     let system_prompt = personality::get_chat_prompt(&recent_context, &weather_ctx);

@@ -363,12 +363,20 @@ async fn chat_with_sheep(
     eprintln!("[co-sheep] Chat request: {}", message);
     vision::chat_with_sheep(&message, &history).await.map_err(|e| {
         eprintln!("[co-sheep] Chat failed: {}", e);
-        let lang = onboarding::get_language().to_lowercase();
-        if lang.contains("norsk") || lang.contains("norwegian") || lang.contains("bokm") {
-            "Bæææ... hjernen min verkar ikkje akkurat no. Prøv igjen?".to_string()
-        } else {
-            "Baaaa... my brain isn't working right now. Try again?".to_string()
+        // One entry per settings.html language option
+        match onboarding::get_language().to_lowercase().as_str() {
+            "nynorsk" => "Bæææ... hjernen min verkar ikkje akkurat no. Prøv igjen?",
+            "bokmål" => "Bæææ... hjernen min virker ikke akkurat nå. Prøv igjen?",
+            "swedish" => "Bäää... min hjärna funkar inte just nu. Försök igen?",
+            "danish" => "Bæææ... min hjerne virker ikke lige nu. Prøv igen?",
+            "german" => "Määä... mein Gehirn funktioniert gerade nicht. Versuch's nochmal?",
+            "french" => "Bêêê... mon cerveau ne marche pas là. Réessaie ?",
+            "spanish" => "Beee... mi cerebro no funciona ahora. ¿Intentas de nuevo?",
+            "japanese" => "メェェ…今、頭が働かないの。もう一度試して？",
+            "korean" => "메에에... 지금 머리가 안 돌아가요. 다시 해볼래요?",
+            _ => "Baaaa... my brain isn't working right now. Try again?",
         }
+        .to_string()
     })
 }
 
