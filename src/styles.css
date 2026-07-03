@@ -135,3 +135,15 @@ body.dragging {
   color: #888;
   padding: 4px 0;
 }
+
+.input-bubble-reply {
+  margin-top: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.input-bubble-reply-error {
+  color: #ff6b6b;
+  font-style: italic;
+}

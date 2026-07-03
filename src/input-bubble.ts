@@ -13,7 +13,9 @@ export class InputBubble {
   private input: HTMLInputElement;
   private button: HTMLButtonElement;
   private promptEl: HTMLDivElement;
+  private replyEl: HTMLDivElement;
   private config: InputBubbleConfig;
+  private onDocMousedown: (e: MouseEvent) => void;
 
   constructor(config: InputBubbleConfig) {
     this.config = config;
@@ -26,6 +28,11 @@ export class InputBubble {
     this.promptEl.className = "speech-bubble-text";
     this.promptEl.textContent = config.promptText;
     this.element.appendChild(this.promptEl);
+
+    this.replyEl = document.createElement("div");
+    this.replyEl.className = "speech-bubble-text input-bubble-reply";
+    this.replyEl.style.display = "none";
+    this.element.appendChild(this.replyEl);
 
     const form = document.createElement("form");
     form.className = "input-bubble-form";
@@ -59,6 +66,27 @@ export class InputBubble {
 
     this.element.appendChild(form);
     document.body.appendChild(this.element);
+
+    // Click anywhere outside the bubble ends the conversation
+    this.onDocMousedown = (e: MouseEvent) => {
+      if (this.element.style.display === "none") return;
+      if (!this.element.contains(e.target as Node)) {
+        this.config.onClose?.();
+      }
+    };
+    document.addEventListener("mousedown", this.onDocMousedown);
+  }
+
+  /** Render the sheep's reply inside the bubble and hand the input back. */
+  showReply(text: string, isError = false) {
+    this.promptEl.style.display = "none";
+    this.promptEl.classList.remove("input-bubble-loading");
+    this.replyEl.style.display = "block";
+    this.replyEl.textContent = text;
+    this.replyEl.classList.toggle("input-bubble-reply-error", isError);
+    this.input.disabled = false;
+    this.button.disabled = false;
+    this.input.focus();
   }
 
   show() {
@@ -73,6 +101,7 @@ export class InputBubble {
   }
 
   destroy() {
+    document.removeEventListener("mousedown", this.onDocMousedown);
     this.hide();
     this.element.remove();
   }
@@ -81,6 +110,8 @@ export class InputBubble {
     this.input.disabled = on;
     this.button.disabled = on;
     if (on) {
+      // showReply hides the prompt line — bring it back for "thinking..."
+      this.promptEl.style.display = "block";
       this.promptEl.textContent = "thinking...";
       this.promptEl.classList.add("input-bubble-loading");
     } else {
