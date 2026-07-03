@@ -305,6 +305,8 @@ export class DramaManager {
               this.applyTransition({
                 idA, idB, from: "feud", to: "reconciling", cause: "mediation",
               });
+              // applyTransition invalidates rec for this iteration; move to next pair
+              continue;
             }
           }
         }
