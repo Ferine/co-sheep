@@ -693,6 +693,15 @@ export class Flock {
     this.clearGroupActivity(true);
   }
 
+  /** A direct chat reply arrived — animate the main sheep and let friends react. */
+  onChatReply(anim: SheepAnimation | null) {
+    this.cancelConversation();
+    this.main.resetActivity();
+    if (anim) this.main.playAnimation(anim);
+    this.triggerFriendReactions("commentary");
+    bus.emit("ai-commentary", { animation: anim });
+  }
+
   draw(ctx: CanvasRenderingContext2D) {
     // Night ambience background (stars, moonlight) — behind everything
     this.nightAmbience.drawBackground(ctx, this.screenWidth, this.screenHeight);

@@ -5,7 +5,8 @@ import { Flock } from "./flock";
 import { InputBubble } from "./input-bubble";
 import { BreakReminder } from "./break-reminder";
 import { createCompositeOverlay } from "./accessories";
-import { FriendConfig } from "./types";
+import { CommentaryEvent, FriendConfig } from "./types";
+import { capTranscript, ChatTurn } from "./chat-transcript";
 import { EasterStatsSnapshot } from "./easter-theme";
 import { bus } from "./events";
 import { DramaManager } from "./drama-manager";
@@ -527,28 +528,52 @@ function drawBubbleShape(
   ctx.restore();
 }
 
+const CHAT_TIMEOUT_MS = 30_000;
+
 function openChat() {
   if (chatBubble) return; // already open
+
+  const transcript: ChatTurn[] = [];
+  let sendSeq = 0; // guards against stale replies after timeout/close
+  flock.main.startListening();
+
+  const closeChat = () => {
+    sendSeq++;
+    flock.main.stopListening();
+    chatBubble?.destroy();
+    chatBubble = null;
+  };
 
   chatBubble = new InputBubble({
     promptText: "Talk to me...",
     placeholder: "Say something...",
     buttonText: "Send",
     onSubmit: async (text) => {
-      chatBubble?.setLoading(true);
+      if (!chatBubble) return;
+      const seq = ++sendSeq;
+      chatBubble.setLoading(true);
+      const history = capTranscript(transcript);
+      transcript.push({ role: "human", text });
       try {
-        await invoke("chat_with_sheep", { message: text });
-        // Response arrives via sheep-commentary event on mainBubble
+        const event = await Promise.race([
+          invoke<CommentaryEvent>("chat_with_sheep", { message: text, history }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject("Zzz..."), CHAT_TIMEOUT_MS),
+          ),
+        ]);
+        if (seq !== sendSeq || !chatBubble) return; // closed meanwhile
+        transcript.push({ role: "sheep", text: event.text });
+        chatBubble.showReply(event.text);
+        flock.onChatReply(event.animation);
       } catch (e) {
         console.error("[co-sheep] Chat error:", e);
+        if (seq !== sendSeq || !chatBubble) return;
+        // The model never answered — drop the turn so a retry isn't doubled
+        if (transcript[transcript.length - 1]?.role === "human") transcript.pop();
+        chatBubble.showReply(typeof e === "string" ? e : "Baaaa... something broke.", true);
       }
-      chatBubble?.destroy();
-      chatBubble = null;
     },
-    onClose: () => {
-      chatBubble?.destroy();
-      chatBubble = null;
-    },
+    onClose: closeChat,
   });
   chatBubble.show();
   chatBubble.updatePosition(flock.main.x, flock.main.y, flock.main.displaySize);
