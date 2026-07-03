@@ -107,7 +107,19 @@ function updateWolf(scene: SpectacleScene, dt: number, world: SpectacleWorld): b
     }
   } else {
     scene.actorX -= speed * 1.4 * dt;
-    if (scene.actorX < -SIZE) return false;
+    if (scene.actorX < -SIZE) {
+      // Survivors catch their breath once the wolf is gone.
+      const RELIEF = ["That was TOO close.", "Wolves. WHY wolves.", "Never speak of this."];
+      let shown = 0;
+      for (const id of scene.participants) {
+        if (shown >= 2) break;
+        const c = world.getCharacter(id);
+        if (!c || c.bubble.visible) continue;
+        c.bubble.show(RELIEF[Math.floor(Math.random() * RELIEF.length)], 3500);
+        shown++;
+      }
+      return false;
+    }
   }
   return true;
 }

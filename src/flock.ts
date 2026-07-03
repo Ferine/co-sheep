@@ -653,7 +653,9 @@ export class Flock {
         // or friend_memory would mint a brain file for it.
         const who = (finished.type === "showdown" && finished.pairIds
           ? [...finished.pairIds]
-          : finished.participants
+          : finished.type === "ufo" && finished.targetId
+            ? [finished.targetId]
+            : finished.participants
         ).filter((id) => id !== "main");
         if (who.length > 0) {
           invoke("record_spectacle", { kind: kindLabels[finished.type], participants: who }).catch(() => {});
