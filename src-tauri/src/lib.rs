@@ -699,8 +699,33 @@ pub fn run() {
             let quit =
                 tauri::menu::MenuItem::with_id(app, "quit", "Quit co-sheep", true, None::<&str>)?;
 
+            // Debug submenu — every item just emits a debug-command to the webview.
+            const DEBUG_ITEMS: [(&str, &str); 9] = [
+                ("debug_force_feud", "Force Feud"),
+                ("debug_spectacle_wolf", "Spectacle: Wolf"),
+                ("debug_spectacle_ufo", "Spectacle: UFO"),
+                ("debug_spectacle_merchant", "Spectacle: Merchant"),
+                ("debug_spectacle_balloon", "Spectacle: Balloon"),
+                ("debug_spectacle_shearing", "Spectacle: Shearing"),
+                ("debug_spectacle_showdown", "Spectacle: Showdown"),
+                ("debug_spectacle_feast", "Spectacle: Feast"),
+                ("debug_app_switch", "Simulate App Switch"),
+            ];
+            let debug_item_refs: Vec<tauri::menu::MenuItem<tauri::Wry>> = DEBUG_ITEMS
+                .iter()
+                .map(|(id, label)| {
+                    tauri::menu::MenuItem::with_id(app, *id, *label, true, None::<&str>)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let debug_items_dyn: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = debug_item_refs
+                .iter()
+                .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
+                .collect();
+            let debug_submenu =
+                tauri::menu::Submenu::with_items(app, "Debug", true, &debug_items_dyn)?;
+
             // Tray icon menu
-            let tray_menu = tauri::menu::Menu::with_items(app, &[&settings_item, &memory_item, &friends_item, &wardrobe_item, &chat_item, &capture_moment_item, &comment_now, &pause, &quit])?;
+            let tray_menu = tauri::menu::Menu::with_items(app, &[&settings_item, &memory_item, &friends_item, &wardrobe_item, &chat_item, &capture_moment_item, &comment_now, &pause, &debug_submenu, &quit])?;
 
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -760,6 +785,23 @@ pub fn run() {
                                     eprintln!("[co-sheep] Failed to open wardrobe: {}", e);
                                 }
                             });
+                        }
+                        id if id.starts_with("debug_") => {
+                            let cmd = match id {
+                                "debug_force_feud" => "force-feud",
+                                "debug_spectacle_wolf" => "spectacle:wolf",
+                                "debug_spectacle_ufo" => "spectacle:ufo",
+                                "debug_spectacle_merchant" => "spectacle:merchant",
+                                "debug_spectacle_balloon" => "spectacle:balloon",
+                                "debug_spectacle_shearing" => "spectacle:shearing",
+                                "debug_spectacle_showdown" => "spectacle:showdown",
+                                "debug_spectacle_feast" => "spectacle:feast",
+                                "debug_app_switch" => "app-switch",
+                                _ => "",
+                            };
+                            if !cmd.is_empty() {
+                                app.emit("debug-command", cmd).ok();
+                            }
                         }
                         _ => {}
                     }
@@ -841,7 +883,7 @@ pub fn run() {
                 app,
                 "co-sheep",
                 true,
-                &[&app_menu_settings, &app_menu_memory, &app_menu_friends, &app_menu_wardrobe, &app_menu_chat, &app_menu_capture_moment, &app_menu_comment_now, &app_menu_pause, &app_menu_debug, &app_menu_quit],
+                &[&app_menu_settings, &app_menu_memory, &app_menu_friends, &app_menu_wardrobe, &app_menu_chat, &app_menu_capture_moment, &app_menu_comment_now, &app_menu_pause, &app_menu_debug, &debug_submenu, &app_menu_quit],
             )?;
             let app_menu = tauri::menu::Menu::with_items(app, &[&app_submenu])?;
             app.set_menu(app_menu)?;
@@ -907,6 +949,23 @@ pub fn run() {
                                 eprintln!("[co-sheep] Debug capture failed: {}", e);
                             }
                         });
+                    }
+                    id if id.starts_with("debug_") => {
+                        let cmd = match id {
+                            "debug_force_feud" => "force-feud",
+                            "debug_spectacle_wolf" => "spectacle:wolf",
+                            "debug_spectacle_ufo" => "spectacle:ufo",
+                            "debug_spectacle_merchant" => "spectacle:merchant",
+                            "debug_spectacle_balloon" => "spectacle:balloon",
+                            "debug_spectacle_shearing" => "spectacle:shearing",
+                            "debug_spectacle_showdown" => "spectacle:showdown",
+                            "debug_spectacle_feast" => "spectacle:feast",
+                            "debug_app_switch" => "app-switch",
+                            _ => "",
+                        };
+                        if !cmd.is_empty() {
+                            app.emit("debug-command", cmd).ok();
+                        }
                     }
                     _ => {}
                 }

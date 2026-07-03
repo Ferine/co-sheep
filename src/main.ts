@@ -340,6 +340,31 @@ async function init() {
     captureMoment();
   });
 
+  // Debug menu — trigger drama/spectacles on demand
+  listen<string>("debug-command", (event) => {
+    const cmd = event.payload;
+    console.log("[co-sheep] debug-command:", cmd);
+    if (cmd === "force-feud") {
+      const key = dramaManager.forceFeud();
+      flock.mainBubble.show(key ? `Feud forced: ${key}` : "No pair available to feud.", 4000);
+    } else if (cmd.startsWith("spectacle:")) {
+      const type = cmd.slice("spectacle:".length) as
+        "wolf" | "ufo" | "merchant" | "balloon" | "shearing" | "showdown" | "feast";
+      if (type === "showdown" || type === "feast") {
+        const ids = flock.getCharacterIds().filter((id) => id !== "main");
+        if (ids.length >= 2) flock.startSpectacle(type, [ids[0], ids[1]]);
+      } else {
+        flock.startSpectacle(type);
+      }
+    } else if (cmd === "app-switch") {
+      bus.emit("app-switched", {
+        app: "Xcode",
+        previousApp: "Safari",
+        previousDurationMs: 3_700_000, // >1h so gossip fires too
+      });
+    }
+  });
+
   // Accessories changed event (main sheep)
   listen("accessories-changed", async () => {
     try {
