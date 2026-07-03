@@ -85,10 +85,12 @@ export class SpeechBubble {
       }
     }, 30);
 
-    // Auto-hide after duration
+    // Auto-hide after duration — but never before the 30ms/char typewriter
+    // has finished, or long replies vanish mid-type
+    const typewriterMs = text.length * 30;
     this.hideTimeout = window.setTimeout(() => {
       this.hide();
-    }, duration);
+    }, Math.max(duration, typewriterMs + 2500));
   }
 
   hide() {
