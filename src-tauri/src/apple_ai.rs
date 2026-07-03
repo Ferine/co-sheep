@@ -87,6 +87,24 @@ pub async fn generate(system: &str, prompt: &str) -> Result<String, BoxError> {
     run_helper(&["generate"], body.to_string().as_bytes()).await
 }
 
+#[derive(serde::Serialize)]
+pub struct HistoryTurn {
+    pub role: String,
+    pub text: String,
+}
+
+/// Run a chat generation with prior turns replayed as a native Transcript
+/// in the helper — the model's chat template owns turn structure, which a
+/// small model handles far better than history folded into the prompt.
+pub async fn generate_chat(
+    system: &str,
+    prompt: &str,
+    history: &[HistoryTurn],
+) -> Result<String, BoxError> {
+    let body = serde_json::json!({ "system": system, "prompt": prompt, "history": history });
+    run_helper(&["generate"], body.to_string().as_bytes()).await
+}
+
 /// Truncate to at most `max_bytes`, respecting char boundaries — the
 /// on-device model has a small (~4k token) context window.
 pub fn truncate_utf8(s: &str, max_bytes: usize) -> &str {

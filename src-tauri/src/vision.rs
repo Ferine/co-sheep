@@ -15,24 +15,6 @@ struct ScreenClassification {
     summary: String,
 }
 
-#[derive(Deserialize)]
-struct CommentaryResponse {
-    text: String,
-    animation: Option<String>,
-    /// Topic key for opinion tracking (e.g. "twitter_usage")
-    #[serde(default)]
-    opinion_topic: Option<String>,
-    /// The opinion itself
-    #[serde(default)]
-    opinion: Option<String>,
-    /// Category: "habit", "fact", "opinion", "pattern"
-    #[serde(default)]
-    opinion_category: Option<String>,
-    /// What to count today (e.g. "twitter_visits", "code_errors")
-    #[serde(default)]
-    count: Option<String>,
-}
-
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct CommentaryEvent {
     text: String,
@@ -259,35 +241,94 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
         .trim_end_matches("```")
         .trim();
 
-    if let Ok(parsed) = serde_json::from_str::<CommentaryResponse>(trimmed) {
-        let valid_animations = [
-            "bounce", "spin", "backflip", "headshake", "zoom", "vibrate",
-        ];
-        let animation = parsed
-            .animation
-            .filter(|a| valid_animations.contains(&a.as_str()));
-        ParsedResponse {
-            event: CommentaryEvent {
-                text: parsed.text,
-                animation,
-            },
-            opinion_topic: parsed.opinion_topic,
-            opinion: parsed.opinion,
-            opinion_category: parsed.opinion_category,
-            count: parsed.count,
+    // The on-device model bends types (count as a number, animation as a
+    // bool) — parse into a Value and coerce per field, so one bent field
+    // doesn't dump raw JSON into the speech bubble
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+            let str_field = |key: &str| -> Option<String> {
+                match v.get(key) {
+                    Some(serde_json::Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                    Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+                    _ => None,
+                }
+            };
+            let valid_animations = [
+                "bounce", "spin", "backflip", "headshake", "zoom", "vibrate",
+            ];
+            let animation =
+                str_field("animation").filter(|a| valid_animations.contains(&a.as_str()));
+            return ParsedResponse {
+                event: CommentaryEvent {
+                    text: text.to_string(),
+                    animation,
+                },
+                opinion_topic: str_field("opinion_topic"),
+                opinion: str_field("opinion"),
+                opinion_category: str_field("opinion_category"),
+                count: str_field("count"),
+            };
         }
-    } else {
-        eprintln!("[co-sheep] Failed to parse as JSON, using raw text");
-        ParsedResponse {
+    }
+
+    // Truncated mid-generation: salvage the text field so the bubble shows
+    // the sheep's words, not a JSON fragment
+    if let Some(text) = extract_text_field(trimmed) {
+        eprintln!("[co-sheep] Truncated JSON, salvaged text field");
+        return ParsedResponse {
             event: CommentaryEvent {
-                text: raw.trim().to_string(),
+                text,
                 animation: None,
             },
             opinion_topic: None,
             opinion: None,
             opinion_category: None,
             count: None,
+        };
+    }
+
+    eprintln!("[co-sheep] Failed to parse as JSON, using raw text");
+    ParsedResponse {
+        event: CommentaryEvent {
+            text: raw.trim().to_string(),
+            animation: None,
+        },
+        opinion_topic: None,
+        opinion: None,
+        opinion_category: None,
+        count: None,
+    }
+}
+
+/// Pull the value of `"text"` out of malformed or truncated JSON. Returns
+/// the full string if its closing quote survived, a `…`-suffixed prefix if
+/// the string itself was cut off, and None if there's nothing usable.
+fn extract_text_field(s: &str) -> Option<String> {
+    let after_key = &s[s.find("\"text\"")? + "\"text\"".len()..];
+    let after_colon = after_key[after_key.find(':')? + 1..].trim_start();
+    let inner = after_colon.strip_prefix('"')?;
+
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return if out.is_empty() { None } else { Some(out) },
+            '\\' => match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some(other) => out.push(other),
+                None => break,
+            },
+            _ => out.push(c),
         }
+    }
+    // Unterminated — the model was cut off mid-sentence. A trailing
+    // fragment still beats raw JSON if there's enough of it.
+    if out.chars().count() > 10 {
+        out.push('…');
+        Some(out)
+    } else {
+        None
     }
 }
 
@@ -350,21 +391,28 @@ pub async fn chat_with_sheep(
     let weather_ctx = crate::weather::get_weather_context().await;
     let system_prompt = personality::get_chat_prompt(&recent_context, &weather_ctx);
 
-    // Fold the (frontend-capped) session transcript into the prompt — the
-    // on-device model is stateless per call
-    let prompt = if history.is_empty() {
-        user_message.to_string()
-    } else {
-        let mut p = String::from("Conversation so far:\n");
-        for turn in history {
-            let who = if turn.role == "sheep" { "You" } else { "Human" };
-            p.push_str(&format!("{}: {}\n", who, turn.text));
-        }
-        p.push_str(&format!("\nHuman: {}", user_message));
-        p
-    };
+    // Replay the (frontend-capped) session transcript as a native Transcript
+    // in the helper. Sheep turns go in as the JSON shape the model is asked
+    // to produce — it imitates its own prior replies, so plain-text history
+    // collapses JSON compliance (0/6 plain vs 6/6 wrapped; folding history
+    // into the prompt instead made it parrot old lines. Measured 2026-07-03).
+    let history_payload: Vec<apple_ai::HistoryTurn> = history
+        .iter()
+        .map(|turn| {
+            let text = if turn.role == "sheep" {
+                serde_json::json!({ "text": turn.text, "animation": null }).to_string()
+            } else {
+                turn.text.clone()
+            };
+            apple_ai::HistoryTurn {
+                role: turn.role.clone(),
+                text,
+            }
+        })
+        .collect();
 
-    let raw_response = apple_ai::generate(&system_prompt, &prompt).await?;
+    let raw_response =
+        apple_ai::generate_chat(&system_prompt, user_message, &history_payload).await?;
 
     eprintln!("[co-sheep] Chat raw response: {}", raw_response);
     let parsed = parse_commentary_response(&raw_response);
@@ -448,4 +496,80 @@ fn parse_classification(text: &str) -> Result<ScreenClassification, Box<dyn std:
         .map_err(|e| format!("Failed to parse classification: {} — raw: {}", e, json_str))?;
 
     Ok(classification)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_full_valid_response() {
+        let p = parse_commentary_response(
+            r#"{"text": "Baaa.", "animation": "bounce", "opinion_topic": "routers", "opinion": "too many", "opinion_category": "habit", "count": "router_talk"}"#,
+        );
+        assert_eq!(p.event.text, "Baaa.");
+        assert_eq!(p.event.animation.as_deref(), Some("bounce"));
+        assert_eq!(p.count.as_deref(), Some("router_talk"));
+    }
+
+    #[test]
+    fn coerces_numeric_count_instead_of_failing() {
+        // The on-device model bends types — a numeric count must not dump
+        // raw JSON into the speech bubble
+        let p = parse_commentary_response(r#"{"text": "Baaa.", "animation": null, "count": 3}"#);
+        assert_eq!(p.event.text, "Baaa.");
+        assert_eq!(p.count.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn ignores_wrong_typed_optional_fields() {
+        let p = parse_commentary_response(
+            r#"{"text": "Baaa.", "animation": true, "opinion": ["a", "b"]}"#,
+        );
+        assert_eq!(p.event.text, "Baaa.");
+        assert_eq!(p.event.animation, None);
+        assert_eq!(p.opinion, None);
+    }
+
+    #[test]
+    fn filters_invalid_animation_names() {
+        let p = parse_commentary_response(r#"{"text": "Baaa.", "animation": "moonwalk"}"#);
+        assert_eq!(p.event.animation, None);
+    }
+
+    #[test]
+    fn salvages_text_from_truncated_json() {
+        // Output cut off mid-generation after the text field closed
+        let p = parse_commentary_response(
+            r#"{"text": "Du har ein fancy router.", "animation": "bounce", "opinion_topic": "tekno"#,
+        );
+        assert_eq!(p.event.text, "Du har ein fancy router.");
+        assert_eq!(p.event.animation, None);
+    }
+
+    #[test]
+    fn salvages_partial_text_when_string_is_cut() {
+        let p = parse_commentary_response(r#"{"text": "Du har ein skikkeleg fancy rout"#);
+        assert_eq!(p.event.text, "Du har ein skikkeleg fancy rout…");
+    }
+
+    #[test]
+    fn handles_escapes_in_salvaged_text() {
+        let p =
+            parse_commentary_response(r#"{"text": "Han sa \"baaa\" til meg.", "animation": bro"#);
+        assert_eq!(p.event.text, "Han sa \"baaa\" til meg.");
+    }
+
+    #[test]
+    fn falls_back_to_raw_for_garbage() {
+        let p = parse_commentary_response("Baaa, eg er berre ein sau.");
+        assert_eq!(p.event.text, "Baaa, eg er berre ein sau.");
+        assert_eq!(p.event.animation, None);
+    }
+
+    #[test]
+    fn strips_markdown_fences() {
+        let p = parse_commentary_response("```json\n{\"text\": \"Baaa.\", \"animation\": null}\n```");
+        assert_eq!(p.event.text, "Baaa.");
+    }
 }

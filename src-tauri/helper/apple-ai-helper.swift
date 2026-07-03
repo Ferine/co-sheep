@@ -8,7 +8,10 @@
 // Subcommands:
 //   check     → prints {"available": bool, "reason": "..."}
 //   ocr       → stdin: base64 JPEG          → stdout: recognized screen text
-//   generate  → stdin: {"system","prompt"}  → stdout: model reply text
+//   generate  → stdin: {"system","prompt","history"?} → stdout: model reply text
+//               history is an optional [{"role": "human"|"sheep", "text": ...}]
+//               list of prior turns, replayed as a native Transcript so the
+//               model's chat template handles multi-turn structure itself
 //
 // `generate` needs macOS 26+ with Apple Intelligence enabled on Apple
 // Silicon. `ocr` works on any supported macOS. The file still compiles
@@ -24,9 +27,15 @@ import Vision
 import FoundationModels
 #endif
 
+struct HistoryTurn: Codable {
+    let role: String
+    let text: String
+}
+
 struct GenerateRequest: Codable {
     let system: String
     let prompt: String
+    let history: [HistoryTurn]?
 }
 
 func readStdin() -> Data {
@@ -81,8 +90,31 @@ func runOCR(base64: String) -> String {
 
 #if canImport(FoundationModels)
 @available(macOS 26.0, *)
-func runGenerate(system: String, prompt: String) async -> String {
-    let session = LanguageModelSession(instructions: system)
+func textSegment(_ content: String) -> Transcript.Segment {
+    .text(Transcript.TextSegment(content: content))
+}
+
+@available(macOS 26.0, *)
+func runGenerate(system: String, prompt: String, history: [HistoryTurn]) async -> String {
+    let session: LanguageModelSession
+    if history.isEmpty {
+        session = LanguageModelSession(instructions: system)
+    } else {
+        // Rebuild the conversation as a native Transcript — the model's own
+        // chat template then owns turn structure, which a small model handles
+        // far better than history folded into prose
+        var entries: [Transcript.Entry] = [
+            .instructions(Transcript.Instructions(segments: [textSegment(system)], toolDefinitions: []))
+        ]
+        for turn in history {
+            if turn.role == "sheep" {
+                entries.append(.response(Transcript.Response(assetIDs: [], segments: [textSegment(turn.text)])))
+            } else {
+                entries.append(.prompt(Transcript.Prompt(segments: [textSegment(turn.text)])))
+            }
+        }
+        session = LanguageModelSession(transcript: Transcript(entries: entries))
+    }
     do {
         let response = try await session.respond(to: prompt)
         return response.content
@@ -114,7 +146,7 @@ struct AppleAIHelper {
             }
             #if canImport(FoundationModels)
             if #available(macOS 26.0, *) {
-                print(await runGenerate(system: request.system, prompt: request.prompt))
+                print(await runGenerate(system: request.system, prompt: request.prompt, history: request.history ?? []))
             } else {
                 fail("generate: requires macOS 26 (Tahoe) or newer")
             }

@@ -30,8 +30,11 @@ The right-click chat with the main sheep is one-shot and buggy:
   the last 8 turns AND a total budget of ~1500 chars, dropping oldest turns first.
   The on-device model has ~4k tokens; the system prompt (opinions, tallies, journal)
   already consumes most of it.
-- `chat_with_sheep(message, history)` — Rust folds history into the user prompt as a
-  `Conversation so far:` block (`Human:` / `You:` lines), then the new message.
+- `chat_with_sheep(message, history)` — Rust passes history to the helper, which
+  replays it as a native FoundationModels `Transcript` (sheep turns wrapped in the
+  JSON reply shape — the model imitates its own prior replies, so plain-text history
+  collapses JSON compliance to 0/6; wrapped is 6/6. Folding history into the prompt
+  as prose instead made the model parrot old lines. Measured live 2026-07-03.)
 - The reply renders inside the chat bubble in a new reply area above the form
   (`.input-bubble-reply`, max-height + overflow-y auto). Input re-enables and refocuses
   after each reply. The returned animation plays on the main sheep.
