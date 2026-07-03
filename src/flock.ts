@@ -11,6 +11,8 @@ import { EasterStatsSnapshot, EasterTheme } from "./easter-theme";
 import { SummerTheme, SUMMER_IDLE_QUIPS } from "./summer-theme";
 import { invoke } from "@tauri-apps/api/core";
 import { bus } from "./events";
+import { SPECTACLE, SpectacleSchedulerState, SpectacleType, markFired, pickRandomSpectacle } from "./spectacles";
+import { SpectacleScene, SpectacleWorld, createSpectacleScene, drawSpectacleScene, updateSpectacleScene } from "./spectacle-render";
 
 const GOOD_COLLEAGUE_QUIPS = [
   "No blir det liv rai rai",
@@ -187,6 +189,12 @@ export class Flock {
   private groupActivityCooldown: number = 0;
   private aiChatPending: boolean = false;
   private aiChatCooldown: number = 0;
+  private spectacle: SpectacleScene | null = null;
+  private spectacleSchedulerState: SpectacleSchedulerState = { lastFiredMs: 0, lastByType: {} };
+  private spectacleCheckTimer = 0;
+  private spectacleStateLoaded = false;
+  /** main.ts points this at dramaManager.resolveShowdown. */
+  onShowdownResolved: ((pair: [string, string], reconciled: boolean) => void) | null = null;
 
   // Stampede
   private stampedeCooldown: number = 0;
@@ -230,6 +238,13 @@ export class Flock {
     setTimeout(() => {
       this.spawnGoodColleague();
     }, 3000);
+
+    invoke<SpectacleSchedulerState | null>("get_living_state", { name: "spectacles" })
+      .then((s) => {
+        if (s && typeof s.lastFiredMs === "number") this.spectacleSchedulerState = s;
+        this.spectacleStateLoaded = true;
+      })
+      .catch(() => { this.spectacleStateLoaded = true; });
   }
 
   private spawnGoodColleague() {
@@ -364,6 +379,20 @@ export class Flock {
       timer: 0,
       participants: new Set(participants),
     };
+    return true;
+  }
+
+  /** Begin a spectacle. Refuses while another scene is running. */
+  startSpectacle(type: SpectacleType, pair?: [string, string]): boolean {
+    if (this.spectacle) return false;
+    this.cancelConversation();
+    const calmIds = this.getCharacterIds().filter((id) => this.isCharacterCalm(id));
+    if (type !== "balloon" && calmIds.length === 0) return false;
+    this.spectacle = createSpectacleScene(type, this.screenWidth, this.screenHeight, calmIds, pair);
+    this.spectacleSchedulerState = markFired(this.spectacleSchedulerState, type, Date.now());
+    invoke("save_living_state", { name: "spectacles", value: this.spectacleSchedulerState }).catch(() => {});
+    bus.emit("spectacle-started", { type });
+    console.log(`[co-sheep] SPECTACLE: ${type}`);
     return true;
   }
 
@@ -604,6 +633,47 @@ export class Flock {
     // Group activities
     this.updateGroupActivityLoop(dt, socialTick);
 
+    // Spectacles: run the active scene, else roll the scheduler every 5 min.
+    if (this.spectacle) {
+      const world = this.spectacleWorld();
+      const alive = updateSpectacleScene(this.spectacle, dt, world);
+      if (!alive) {
+        const finished = this.spectacle;
+        this.spectacle = null;
+        bus.emit("spectacle-ended", { type: finished.type });
+        if (finished.type === "showdown" && finished.pairIds && this.onShowdownResolved) {
+          this.onShowdownResolved(finished.pairIds, finished.data.reconciled === 1);
+        }
+        const kindLabels: Record<SpectacleType, string> = {
+          wolf: "wolf scare", ufo: "UFO encounter", merchant: "merchant visit",
+          balloon: "balloon flyover", shearing: "shearing day",
+          showdown: "high-noon showdown", feast: "reconciliation feast",
+        };
+        // "main" has no friend brain — never pass it to record_spectacle
+        // or friend_memory would mint a brain file for it.
+        const who = (finished.type === "showdown" && finished.pairIds
+          ? [...finished.pairIds]
+          : finished.participants
+        ).filter((id) => id !== "main");
+        if (who.length > 0) {
+          invoke("record_spectacle", { kind: kindLabels[finished.type], participants: who }).catch(() => {});
+        }
+      }
+    } else if (this.spectacleStateLoaded) {
+      this.spectacleCheckTimer += dt;
+      if (this.spectacleCheckTimer >= SPECTACLE.CHECK_INTERVAL_MS) {
+        this.spectacleCheckTimer = 0;
+        const hour = new Date().getHours();
+        const type = pickRandomSpectacle({
+          state: this.spectacleSchedulerState,
+          nowMs: Date.now(),
+          isNight: hour >= 20 || hour < 6,
+          rand: Math.random(),
+        });
+        if (type) this.startSpectacle(type);
+      }
+    }
+
     // Social behaviors + periodic quips
     if (socialTick) {
       if (!this.groupActivity) {
@@ -642,6 +712,10 @@ export class Flock {
     // Friends on top
     for (const entry of this.friends.values()) {
       entry.sheep.draw(ctx);
+    }
+
+    if (this.spectacle) {
+      drawSpectacleScene(this.spectacle, ctx, this.spectacleWorld());
     }
 
     // Build positions for night foreground effects
@@ -683,6 +757,7 @@ export class Flock {
     if (!socialTick) return;
     if (this.groupActivityCooldown > 0) return;
     if (this.activeConversation) return;
+    if (this.spectacle) return;
     if (this.friends.size < 2) return; // need at least 3 total (main + 2 friends)
     if (Math.random() > 0.001) return; // 0.1% per tick
 
@@ -840,6 +915,15 @@ export class Flock {
         }
       }
     }
+  }
+
+  private spectacleWorld(): SpectacleWorld {
+    return {
+      getCharacter: (id) => this.getSheepById(id),
+      characterIds: () => this.getCharacterIds(),
+      screenW: this.screenWidth,
+      screenH: this.screenHeight,
+    };
   }
 
   private getSheepById(id: string): { sheep: Sheep; bubble: SpeechBubble; personality?: string } | null {

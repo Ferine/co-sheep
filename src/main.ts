@@ -63,6 +63,13 @@ async function init() {
   dramaManager = new DramaManager(flock);
   dramaManager.start();
 
+  dramaManager.onDramaTriggeredSpectacle = (kind, pair) => {
+    flock.startSpectacle(kind, pair);
+  };
+  flock.onShowdownResolved = (pair, reconciled) => {
+    dramaManager.resolveShowdown(pair, reconciled);
+  };
+
   // Load settings (personality, break reminders, accessories)
   try {
     const settings = await invoke<{
