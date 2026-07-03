@@ -356,17 +356,20 @@ fn set_cursor_events(
 }
 
 #[tauri::command]
-async fn chat_with_sheep(app: tauri::AppHandle, message: String) -> Result<String, String> {
+async fn chat_with_sheep(
+    message: String,
+    history: Vec<vision::ChatTurn>,
+) -> Result<vision::CommentaryEvent, String> {
     eprintln!("[co-sheep] Chat request: {}", message);
-    match vision::chat_with_sheep(&app, &message).await {
-        Ok(event) => serde_json::to_string(&event).map_err(|e| e.to_string()),
-        Err(e) => {
-            let msg = format!("Chat failed: {}", e);
-            eprintln!("[co-sheep] {}", msg);
-            app.emit("sheep-commentary", "Baaaa... my brain isn't working right now. Try again?").ok();
-            Err(msg)
+    vision::chat_with_sheep(&message, &history).await.map_err(|e| {
+        eprintln!("[co-sheep] Chat failed: {}", e);
+        let lang = onboarding::get_language().to_lowercase();
+        if lang.contains("norsk") || lang.contains("norwegian") || lang.contains("bokm") {
+            "Bæææ... hjernen min verkar ikkje akkurat no. Prøv igjen?".to_string()
+        } else {
+            "Baaaa... my brain isn't working right now. Try again?".to_string()
         }
-    }
+    })
 }
 
 #[tauri::command]

@@ -331,15 +331,35 @@ async fn generate_commentary(
 
 // ─── Chat (text-only, for conversation mode) ────────────────────────────────
 
+#[derive(serde::Deserialize)]
+pub struct ChatTurn {
+    pub role: String,
+    pub text: String,
+}
+
 pub async fn chat_with_sheep(
-    app: &tauri::AppHandle,
     user_message: &str,
+    history: &[ChatTurn],
 ) -> Result<CommentaryEvent, Box<dyn std::error::Error + Send + Sync>> {
     let recent_context = memory::get_recent_context().unwrap_or_default();
     let weather_ctx = crate::weather::get_weather_context().await;
     let system_prompt = personality::get_chat_prompt(&recent_context, &weather_ctx);
 
-    let raw_response = apple_ai::generate(&system_prompt, user_message).await?;
+    // Fold the (frontend-capped) session transcript into the prompt — the
+    // on-device model is stateless per call
+    let prompt = if history.is_empty() {
+        user_message.to_string()
+    } else {
+        let mut p = String::from("Conversation so far:\n");
+        for turn in history {
+            let who = if turn.role == "sheep" { "You" } else { "Human" };
+            p.push_str(&format!("{}: {}\n", who, turn.text));
+        }
+        p.push_str(&format!("\nHuman: {}", user_message));
+        p
+    };
+
+    let raw_response = apple_ai::generate(&system_prompt, &prompt).await?;
 
     eprintln!("[co-sheep] Chat raw response: {}", raw_response);
     let parsed = parse_commentary_response(&raw_response);
@@ -359,9 +379,7 @@ pub async fn chat_with_sheep(
         user_message, parsed.event.text, parsed.event.animation
     )).ok();
 
-    // Emit to frontend
-    app.emit("sheep-commentary", &parsed.event)?;
-
+    // The chat bubble owns display now — no sheep-commentary emit
     Ok(parsed.event)
 }
 
