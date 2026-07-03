@@ -16,22 +16,23 @@ Event vocabulary:
 
 | Event | Payload (essentials) |
 |---|---|
-| `affinity-changed` | pair ids, old/new score |
 | `sheep-petted` | sheep id |
 | `group-activity` | activity type, participant ids |
-| `conversation-happened` | pair ids, topic/category |
-| `app-switched` | app name, bundle id, previous app, session duration |
-| `nightfall` / `weather-changed` | phase / weather condition |
-| `ai-commentary` | mood, animation chosen |
+| `conversation-happened` | pair ids, topic |
+| `app-switched` | app name, previous app, previous session duration |
+| `weather-changed` | weather condition |
+| `ai-commentary` | animation chosen |
 | `drama-state-changed` | pair ids, old state, new state, cause |
-| `spectacle-started` / `spectacle-ended` | spectacle id |
+| `spectacle-started` / `spectacle-ended` | spectacle type |
+
+(Affinity changes are not bus events — affinity lives in Rust and the drama engine polls it each tick. No `nightfall` event: nothing consumes it in v1.)
 
 Existing systems publish via one-line `emit()` calls at points where these things already happen; no restructuring. Every subscriber is wrapped in try/catch so one failing consumer cannot break the loop or other consumers.
 
 ## 2. App Awareness Signal — Rust side
 
-- Poll `NSWorkspace.shared.frontmostApplication` every 5 s from a background thread in `src-tauri`.
-- Capture **app name + bundle ID only**. No window titles in v1 (titles require the Accessibility permission; not worth a second permission war).
+- Poll the frontmost app every 5 s from a background task in `src-tauri`, via the front-to-back `CGWindowListCopyWindowInfo` ordering (`kCGWindowOwnerName` of the first layer-0 window not owned by us) — the same raw-FFI pattern `windows.rs` already uses, so no new objc dependency.
+- Capture **app name only**. No bundle IDs (not available via CGWindowList and not needed for categorization) and no window titles in v1 (titles require the Accessibility permission; not worth a second permission war).
 - Track per-app session duration in Rust; emit `app-switched` Tauri events to the webview on change, including the duration of the session that just ended.
 - No screenshot, no OCR, no AI call. The existing heavy two-pass pipeline is untouched.
 
@@ -42,7 +43,7 @@ Relationship state machine per sheep pair, layered on existing persisted affinit
 **States:** `neutral ⇄ warm → inseparable`, `neutral ⇄ tension → feud → reconciling → warm`.
 
 **Transition inputs:**
-- Affinity thresholds, held across two consecutive daily ticks (e.g. affinity ≥ +8 → warm; ≤ −3 → tension). Exact numbers are named tuning constants in `drama.ts`, not contract.
+- Affinity thresholds with hysteresis (enter threshold above exit threshold, e.g. warm enters at ≥ +8 and exits below +5) plus a 30-minute minimum dwell per state so pairs can't flap. Exact numbers are named tuning constants in `drama.ts`, not contract.
 - Current moods of both sheep (grumpy accelerates tension; happy accelerates warmth).
 - Random low-probability "sparks" so identical inputs don't produce identical flocks.
 - **Jealousy counter:** petting imbalance (one sheep petted ≥5 times more than another in a day) pushes the neglected sheep toward tension with the favored one.
@@ -55,18 +56,18 @@ Relationship state machine per sheep pair, layered on existing persisted affinit
 
 **AI narration:** on `drama-state-changed`, 30% chance of an on-device-generated unique line (same pattern and availability check as existing AI-generated conversations). Falls back to scripts.
 
-**Mechanics:** evaluation tick 1/min; daily decay pulls extreme states back toward neutral over ~a week if unfed. Persistence: `relationshipStates` map + capped drama log (last 50 events) in the existing friend brain JSON (`~/.co-sheep/friends/{id}.json`). Missing fields initialize to `neutral` — no migration.
+**Mechanics:** evaluation tick 1/min; the existing daily affinity decay in Rust pulls extreme states back toward neutral if unfed. Persistence: a pair-keyed map + capped drama log (last 50 events) + daily petting counters in `~/.co-sheep/drama.json` (pair state belongs to the pair, not to either sheep's brain — storing it per-friend would duplicate it in two files). Missing state initializes to `neutral` — no migration.
 
 ## 4. Spectacle Scheduler — `src/spectacles.ts`
 
-Weighted random table + pity timer. At most ~1 spectacle/day; guaranteed at least one per ~3 days of app uptime. Suppressed during night mode. Last-fired timestamps persist in `~/.co-sheep/config.json` so restarts don't reset the clock.
+Weighted random table + pity timer. At most ~1 spectacle/day; guaranteed at least one per ~3 days of app uptime. Suppressed during night mode. Last-fired timestamps persist in `~/.co-sheep/spectacles.json` so restarts don't reset the clock (kept out of `config.json` to avoid coupling scheduler state to user settings).
 
 **Pure-random spectacles:**
 - **Wolf sighting** — wolf sprite crosses the screen edge; flock scatters, then huddles; Good Colleague pretends he wasn't scared.
 - **UFO visit** — beam abducts one friend for ~20 s; they return "changed" (temporary mood shift + temporary accessory).
 - **Traveling merchant** — merchant sheep wanders through, gifts a random wardrobe accessory.
 - **Hot-air balloon flyover** — ambient; sheep stop and watch.
-- **Shearing day** — all sheep briefly shorn (pink), mortified reactions, wool regrows over an hour.
+- **Shearing day** — all sheep briefly shorn (pink), mortified reactions, wool regrows over the scene's final seconds (~1 minute total).
 
 **Drama-triggered spectacles:**
 - **High-noon showdown** — fires when a feud persists ≥2 days: staredown center-screen, tumbleweed, flock watches from the sides; outcome nudges the feud toward reconciling or deepens it.
