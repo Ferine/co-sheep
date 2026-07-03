@@ -20,11 +20,22 @@ const CATEGORY_APPS: Record<Exclude<AppCategory, "other">, string[]> = {
 
 export function categorizeApp(appName: string): AppCategory {
   const lower = appName.toLowerCase();
+
+  // Pass 1: exact match (case-insensitive) across ALL categories first.
   for (const [category, names] of Object.entries(CATEGORY_APPS)) {
-    if (names.some((n) => lower === n.toLowerCase() || lower.includes(n.toLowerCase()))) {
+    if (names.some((n) => lower === n.toLowerCase())) {
       return category as AppCategory;
     }
   }
+
+  // Pass 2: substring match, but only for names with length >= 4 to avoid
+  // short names (like "X") false-positive matching unrelated apps.
+  for (const [category, names] of Object.entries(CATEGORY_APPS)) {
+    if (names.some((n) => n.length >= 4 && lower.includes(n.toLowerCase()))) {
+      return category as AppCategory;
+    }
+  }
+
   return "other";
 }
 
@@ -58,6 +69,12 @@ const GOSSIP_TEMPLATES: ConversationScript[] = [
   ],
 ];
 
+const CATEGORY_LABELS: Record<AppCategory, string> = {
+  dev: "the editor", terminal: "the terminal", social: "the group chats",
+  browser: "the browser", meetings: "meetings", music: "the music app",
+  mail: "the inbox", notes: "the notes app", other: "that app",
+};
+
 const INSTANT_BIT_COOLDOWN_MS = 10 * 60 * 1000;
 const GOSSIP_HOUR_MS = 3600 * 1000;
 
@@ -67,18 +84,14 @@ export class GossipManager {
   private day = new Date().toISOString().slice(0, 10);
   private lastInstantBit = 0;
   private currentCategory: AppCategory | null = null;
+  private lastCreditAt = Date.now();
 
   constructor(private flock: Flock) {}
 
   start(): void {
-    bus.on("app-switched", ({ app, previousApp, previousDurationMs }) => {
+    bus.on("app-switched", ({ app }) => {
       this.rollDay();
-
-      // Credit the finished session to the previous app's category.
-      if (previousApp && previousDurationMs > 0) {
-        const prevCat = categorizeApp(previousApp);
-        this.categoryMsToday[prevCat] = (this.categoryMsToday[prevCat] ?? 0) + previousDurationMs;
-      }
+      this.creditElapsed();
 
       const cat = categorizeApp(app);
       const isNewCategory = cat !== this.currentCategory;
@@ -91,6 +104,22 @@ export class GossipManager {
       }
       this.maybeGossip(cat);
     });
+
+    setInterval(() => {
+      this.rollDay();
+      this.creditElapsed();
+      if (this.currentCategory) this.maybeGossip(this.currentCategory);
+    }, 5 * 60 * 1000);
+  }
+
+  /** Credit elapsed time since the last credit to the current category. */
+  private creditElapsed(): void {
+    const now = Date.now();
+    if (this.currentCategory) {
+      this.categoryMsToday[this.currentCategory] =
+        (this.categoryMsToday[this.currentCategory] ?? 0) + (now - this.lastCreditAt);
+    }
+    this.lastCreditAt = now;
   }
 
   private rollDay(): void {
@@ -129,9 +158,13 @@ export class GossipManager {
       .getCharacterIds()
       .filter((id) => id !== "main" && this.flock.isCharacterCalm(id));
     if (friends.length < 2) return;
-    const [a, b] = friends.sort(() => Math.random() - 0.5);
+    const i = Math.floor(Math.random() * friends.length);
+    let j = Math.floor(Math.random() * (friends.length - 1));
+    if (j >= i) j++;
+    const a = friends[i];
+    const b = friends[j];
 
-    const appLabel = cat === "other" ? "that app" : `the ${cat === "dev" ? "editor" : cat}`;
+    const appLabel = CATEGORY_LABELS[cat];
     const template = GOSSIP_TEMPLATES[Math.floor(Math.random() * GOSSIP_TEMPLATES.length)];
     const script: ConversationScript = template.map((line) => ({
       ...line,
