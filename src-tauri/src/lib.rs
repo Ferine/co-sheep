@@ -1,3 +1,4 @@
+mod app_watch;
 mod apple_ai;
 mod capture;
 mod cursor;
@@ -76,6 +77,12 @@ async fn check_ai_ready() -> bool {
 #[tauri::command]
 fn record_interaction(interaction: String) {
     memory::record_interaction(&interaction);
+}
+
+/// Bump the daily usage tally for an app category (feeds AI "Today's tallies").
+#[tauri::command]
+fn record_app_usage(category: String) -> u32 {
+    memory::increment_today(&format!("app:{}", category))
 }
 
 #[tauri::command]
@@ -572,6 +579,7 @@ pub fn run() {
             get_memory,
             open_memory_window,
             record_interaction,
+            record_app_usage,
             debug_capture,
             get_friends,
             add_friend,
@@ -916,6 +924,13 @@ pub fn run() {
             let vision_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 vision::vision_loop(vision_handle).await;
+            });
+
+            // Spawn frontmost-app watcher (feeds gossip & live reactions)
+            eprintln!("[co-sheep] Spawning app watch loop");
+            let app_watch_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                app_watch::app_watch_loop(app_watch_handle).await;
             });
 
             eprintln!("[co-sheep] Setup complete");
