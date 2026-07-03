@@ -40,6 +40,9 @@ export class BreakReminder {
   private readonly CHECK_INTERVAL = 30_000;
   private checkAccum = 0;
 
+  /** Set from app-switched events; names the culprit app in reminders. */
+  currentApp: string | null = null;
+
   update(
     dt: number,
     sheepState: SheepState,
@@ -63,7 +66,10 @@ export class BreakReminder {
 
     if (!this.reminderShown && Date.now() - this.lastBoredTime > this.WORK_THRESHOLD) {
       const pool = MESSAGES[personality] || MESSAGES["snarky"];
-      const msg = pool[Math.floor(Math.random() * pool.length)];
+      let msg = pool[Math.floor(Math.random() * pool.length)];
+      if (this.currentApp) {
+        msg += ` (${this.currentApp}, specifically.)`;
+      }
       bubble.show(msg, 10000);
       if (onAnimation) onAnimation("headshake");
       this.reminderShown = true;

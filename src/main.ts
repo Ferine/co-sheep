@@ -9,6 +9,7 @@ import { FriendConfig } from "./types";
 import { EasterStatsSnapshot } from "./easter-theme";
 import { bus } from "./events";
 import { DramaManager } from "./drama-manager";
+import { GossipManager } from "./gossip";
 import "./styles.css";
 
 let flock: Flock;
@@ -69,6 +70,18 @@ async function init() {
   flock.onShowdownResolved = (pair, reconciled) => {
     dramaManager.resolveShowdown(pair, reconciled);
   };
+
+  const gossipManager = new GossipManager(flock);
+  gossipManager.start();
+
+  // Bridge the Rust app watcher onto the flock bus.
+  listen<{ app: string; previousApp: string | null; previousDurationMs: number }>(
+    "app-switched",
+    (event) => {
+      bus.emit("app-switched", event.payload);
+      breakReminder.currentApp = event.payload.app;
+    },
+  );
 
   // Load settings (personality, break reminders, accessories)
   try {
