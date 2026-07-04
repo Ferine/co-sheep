@@ -289,12 +289,21 @@ pub async fn run_daily_reflection() {
         return;
     }
 
+    let yesterday = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let days = memory::list_journal_days();
     let marked = today_str.clone();
-    if memory::update_brain(move |b| b.last_reflection_date = marked).is_err() {
+    let yest = yesterday.clone();
+    if memory::update_brain(move |b| {
+        b.last_reflection_date = marked;
+        if let Some(c) = advanced_cursor(&days, &b.backfill_cursor, &yest) {
+            b.backfill_cursor = c;
+        }
+    })
+    .is_err()
+    {
         return;
     }
 
-    let yesterday = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
     let Some(journal) = memory::read_journal_for(&yesterday) else {
         eprintln!("[co-sheep] Reflection: no journal for {}, nothing to tidy", yesterday);
         return;
@@ -317,6 +326,17 @@ pub fn pending_backfill_day(days: &[String], cursor: &str, before: &str) -> Opti
     days.iter()
         .find(|d| d.as_str() > cursor && d.as_str() < before)
         .cloned()
+}
+
+/// Once the archive before yesterday is drained, the daily pass claims
+/// yesterday by advancing the cursor — backfill must never re-process a
+/// day the daily reflection already consolidated.
+pub fn advanced_cursor(days: &[String], cursor: &str, yesterday: &str) -> Option<String> {
+    if cursor < yesterday && pending_backfill_day(days, cursor, yesterday).is_none() {
+        Some(yesterday.to_string())
+    } else {
+        None
+    }
 }
 
 /// Distill one archived journal day into opinions. Returns false when the
@@ -547,5 +567,28 @@ mod tests {
         // yesterday itself — that day belongs to the daily reflection pass.
         let two_day_gap: Vec<String> = ["2026-07-01", "2026-07-03"].map(String::from).into();
         assert_eq!(pending_backfill_day(&two_day_gap, "2026-07-01", "2026-07-03"), None);
+    }
+
+    #[test]
+    fn steady_state_cursor_advance_prevents_double_processing() {
+        let days: Vec<String> =
+            ["2026-07-01", "2026-07-02", "2026-07-03"].map(String::from).into();
+        // Archive drained to N-2; daily pass about to consolidate 07-03
+        assert_eq!(
+            advanced_cursor(&days, "2026-07-02", "2026-07-03"),
+            Some("2026-07-03".into())
+        );
+        // Next day: cursor now 07-03, backfill bound 07-04 — nothing pending
+        let days2: Vec<String> =
+            ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"].map(String::from).into();
+        assert_eq!(pending_backfill_day(&days2, "2026-07-03", "2026-07-04"), None);
+    }
+
+    #[test]
+    fn cursor_not_advanced_while_archive_pending() {
+        // App was off: 07-01 and 07-02 journals never processed; daily does 07-03
+        let days: Vec<String> =
+            ["2026-07-01", "2026-07-02", "2026-07-03"].map(String::from).into();
+        assert_eq!(advanced_cursor(&days, "2026-06-30", "2026-07-03"), None);
     }
 }
