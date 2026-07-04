@@ -302,6 +302,42 @@ pub async fn run_daily_reflection() {
     }
 }
 
+/// Oldest journal day after the cursor, strictly before today.
+pub fn pending_backfill_day(days: &[String], cursor: &str, today: &str) -> Option<String> {
+    days.iter()
+        .find(|d| d.as_str() > cursor && d.as_str() < today)
+        .cloned()
+}
+
+/// Distill one archived journal day into opinions. Returns false when the
+/// archive is exhausted. The cursor advances even on failure — a garbage
+/// day is skipped, not retried forever.
+pub async fn run_backfill_step() -> bool {
+    let today = chrono::Local::now().date_naive();
+    let today_str = today.format("%Y-%m-%d").to_string();
+    let brain = memory::load_brain();
+    let days = memory::list_journal_days();
+    let Some(day) = pending_backfill_day(&days, &brain.backfill_cursor, &today_str) else {
+        return false;
+    };
+
+    let cursor = day.clone();
+    if memory::update_brain(move |b| b.backfill_cursor = cursor).is_err() {
+        return false;
+    }
+
+    let Some(journal) = memory::read_journal_for(&day) else {
+        return true;
+    };
+    eprintln!("[co-sheep] Backfill: distilling journal {}", day);
+    let label = format!("Diary for {}", day);
+    match reflect_once(&brain.opinions, &journal, &label, ReflectPolicy::backfill(today)).await {
+        Ok(stats) => eprintln!("[co-sheep] Backfill {} applied: {:?}", day, stats),
+        Err(e) => eprintln!("[co-sheep] Backfill {} failed, skipped: {}", day, e),
+    }
+    true
+}
+
 const LOOP_INTERVAL_SECS: u64 = 180;
 
 /// Background loop: daily reflection, then (Task 7) one backfill step per
@@ -311,6 +347,7 @@ pub async fn reflection_loop() {
     loop {
         if !crate::VISION_TICK_RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
             run_daily_reflection().await;
+            run_backfill_step().await;
         }
         tokio::time::sleep(std::time::Duration::from_secs(LOOP_INTERVAL_SECS)).await;
     }
@@ -485,5 +522,16 @@ mod tests {
         // Strongest survive the cap; weakest are cut
         assert!(p.contains("[t79]"));
         assert!(!p.contains("[t0]"));
+    }
+
+    #[test]
+    fn backfill_picks_oldest_unprocessed_day_before_today() {
+        let days: Vec<String> =
+            ["2026-06-30", "2026-07-01", "2026-07-03", "2026-07-04"].map(String::from).into();
+        assert_eq!(pending_backfill_day(&days, "", "2026-07-04"), Some("2026-06-30".into()));
+        assert_eq!(pending_backfill_day(&days, "2026-06-30", "2026-07-04"), Some("2026-07-01".into()));
+        assert_eq!(pending_backfill_day(&days, "2026-07-01", "2026-07-04"), Some("2026-07-03".into()));
+        // Today is excluded; cursor at last eligible day means done
+        assert_eq!(pending_backfill_day(&days, "2026-07-03", "2026-07-04"), None);
     }
 }
