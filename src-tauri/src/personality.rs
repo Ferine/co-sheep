@@ -135,6 +135,9 @@ DAILY COUNTS: Track recurring things today with "count". This lets you say thing
 "That's the 4th time on Twitter today" with real numbers. Use short keys like
 "twitter_visits", "code_errors", "tab_hoarding", "coffee_breaks".
 
+TOPIC KEYS: If your new opinion concerns something you already have an opinion about
+(the keys in [brackets] above), reuse that exact topic key — never invent a variant.
+
 IMPORTANT: Reply with ONLY valid JSON, no markdown:
 {{"text": "your comment", "animation": "bounce", "opinion_topic": "twitter_usage", "opinion": "My human is addicted to Twitter", "opinion_category": "habit", "count": "twitter_visits"}}
 
@@ -193,6 +196,7 @@ It's {time_str} on {day_str}. {time_period}{weather_line}
 {context_section}
 Your human is talking to you directly. Respond in character. Keep it short (1-3 sentences).
 You can form opinions about what they say. Be yourself — don't be helpful or assistant-like.
+When forming an opinion on a topic you already have a key for (in [brackets] above), reuse that exact key.
 
 LANGUAGE: Respond in {language}.
 

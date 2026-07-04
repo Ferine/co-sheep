@@ -160,6 +160,18 @@ pub fn select_opinions<'a>(
         .collect()
 }
 
+/// Canonical topic key: lowercase, trimmed, whitespace runs become one `_`.
+/// Keeps model-invented variants like "Twitter Usage" from fragmenting
+/// conviction across duplicate opinions.
+pub fn canonicalize_topic(topic: &str) -> String {
+    topic
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
 pub fn load_brain() -> SheepBrain {
     let path = opinions_path();
     if !path.exists() {
@@ -195,6 +207,7 @@ pub fn save_opinion(
     category: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _guard = BRAIN_LOCK.lock().unwrap();
+    let topic = canonicalize_topic(topic);
     let mut brain = load_brain();
     let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -461,5 +474,12 @@ mod tests {
         let picked = select_opinions(&ops, None, today());
         assert_eq!(picked.len(), 20);
         assert_eq!(picked[0].topic, "t29"); // highest conviction first
+    }
+
+    #[test]
+    fn canonicalize_lowercases_and_underscores() {
+        assert_eq!(canonicalize_topic("  Twitter Usage "), "twitter_usage");
+        assert_eq!(canonicalize_topic("dark_mode"), "dark_mode");
+        assert_eq!(canonicalize_topic("Tab   Hoarding"), "tab_hoarding");
     }
 }
