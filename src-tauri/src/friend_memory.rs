@@ -234,11 +234,6 @@ pub fn remove_brain(id: &str) {
     }
 }
 
-pub fn get_affinity(id_a: &str, id_b: &str) -> i32 {
-    let brain = load_brain(id_a);
-    brain.relationships.get(id_b).copied().unwrap_or(0)
-}
-
 pub fn get_mood(id: &str) -> String {
     load_brain(id).mood.clone()
 }
@@ -341,44 +336,38 @@ pub fn update_mood(id: &str) {
     }
 }
 
-pub fn get_friend_context(id: &str) -> String {
+/// Compact social context for friend-to-friend chat prompts, ≤ 300 chars:
+/// mood, affinity toward the partner, and the last few memories.
+pub fn get_chat_context(id: &str, other_id: &str) -> String {
     let brain = load_brain(id);
-    let mut lines = vec![
-        format!("{}'s mood: {}", brain.name, brain.mood),
-    ];
+    let other_name = load_brain(other_id).name.clone();
+    format_chat_context(&brain, other_id, &other_name)
+}
 
-    // Relationships
-    if !brain.relationships.is_empty() {
-        let rels: Vec<String> = brain.relationships.iter()
-            .filter(|(_, v)| **v != 0)
-            .map(|(other, v)| {
-                let label = if *v > 30 { "loves" } else if *v > 10 { "likes" } else if *v < 0 { "avoids" } else { "neutral toward" };
-                let other_name = load_brain(other).name.clone();
-                format!("{} {} (affinity {})", label, other_name, v)
-            })
-            .collect();
-        if !rels.is_empty() {
-            lines.push(format!("Relationships: {}", rels.join(", ")));
-        }
-    }
-
-    // Recent memories (last 5)
-    let recent: Vec<&FriendMemory> = brain.memories.iter().rev().take(5).collect();
+fn format_chat_context(brain: &FriendBrain, other_id: &str, other_name: &str) -> String {
+    let affinity = brain.relationships.get(other_id).copied().unwrap_or(0);
+    let label = if affinity > 30 {
+        "loves"
+    } else if affinity > 10 {
+        "likes"
+    } else if affinity < 0 {
+        "avoids"
+    } else {
+        "is neutral toward"
+    };
+    let mut s = format!("{} is {} and {} {}.", brain.name, brain.mood, label, other_name);
+    let recent: Vec<String> = brain.memories.iter().rev().take(3).map(|m| m.text.clone()).collect();
     if !recent.is_empty() {
-        lines.push("Recent memories:".to_string());
-        for m in recent {
-            lines.push(format!("- {} ({})", m.text, m.timestamp));
-        }
+        s.push_str(&format!(" Remembers: {}.", recent.join("; ")));
     }
-
-    lines.push(format!(
-        "Stats: {} conversations today, {} total, alive for {} days",
-        brain.stats.conversations_today,
-        brain.stats.conversations_total,
-        brain.stats.days_alive,
-    ));
-
-    lines.join("\n")
+    if s.len() > 300 {
+        let mut end = 300;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s.truncate(end);
+    }
+    s
 }
 
 #[cfg(test)]
@@ -424,5 +413,25 @@ mod tests {
         assert!(on_disk["memories"][0]["with"].as_str() == Some("friend_a"));
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn chat_context_is_compact_and_capped() {
+        let mut brain = new_brain("pelle", "Pelle");
+        brain.mood = "grumpy".into();
+        brain.relationships.insert("kari".into(), 35);
+        for i in 0..10 {
+            add_memory(
+                &mut brain,
+                &format!("Talked with Kari about very important sheep business number {}", i),
+                "conversation",
+                Some("kari".into()),
+            );
+        }
+        let ctx = format_chat_context(&brain, "kari", "Kari");
+        assert!(ctx.starts_with("Pelle is grumpy and loves Kari."));
+        assert!(ctx.contains("number 9")); // most recent memory included
+        assert!(!ctx.contains("number 0")); // only the last 3
+        assert!(ctx.len() <= 300);
     }
 }

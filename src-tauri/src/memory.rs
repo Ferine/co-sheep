@@ -11,7 +11,7 @@ static BRAIN_LOCK: Mutex<()> = Mutex::new(());
 
 /// Last `max_bytes` of `s`, cut forward to a char boundary so slicing
 /// never panics on multibyte UTF-8 (the journal is full of æ/ø/å).
-fn tail_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+pub(crate) fn tail_at_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
@@ -74,6 +74,12 @@ pub struct SheepBrain {
     pub total_comments: u32,
     /// Total user interactions (pets, double-clicks, file drops)
     pub total_interactions: u32,
+    /// Date the daily reflection pass last ran (or was marked done)
+    #[serde(default)]
+    pub last_reflection_date: String,
+    /// Last journal date processed by the historical backfill
+    #[serde(default)]
+    pub backfill_cursor: String,
 }
 
 impl Default for SheepBrain {
@@ -84,8 +90,126 @@ impl Default for SheepBrain {
             counts_date: Local::now().format("%Y-%m-%d").to_string(),
             total_comments: 0,
             total_interactions: 0,
+            last_reflection_date: String::new(),
+            backfill_cursor: String::new(),
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Opinion scoring — conviction × recency × relevance.
+// Selection for the prompt context; nothing here touches disk.
+// ═══════════════════════════════════════════════════════════
+
+const RECENCY_HALF_LIFE_DAYS: f64 = 14.0;
+const RELEVANCE_CAP: f64 = 2.0;
+const MAX_CONTEXT_OPINIONS: usize = 20;
+const TOPIC_TOKEN_WEIGHT: f64 = 1.0;
+const TEXT_TOKEN_WEIGHT: f64 = 0.5;
+
+fn tokenize(s: &str) -> std::collections::HashSet<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+/// 0.5^(days_idle / half-life). Unparseable last_seen scores the midpoint —
+/// neither fresh nor ancient.
+fn recency_weight(last_seen: &str, today: chrono::NaiveDate) -> f64 {
+    let Some(date) = last_seen
+        .get(..10)
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+    else {
+        return 0.5;
+    };
+    let days = (today - date).num_days().max(0) as f64;
+    0.5_f64.powf(days / RECENCY_HALF_LIFE_DAYS)
+}
+
+/// Token overlap between the query and the opinion; topic-key tokens weigh
+/// double text tokens. Capped so relevance can re-rank but not dominate.
+fn relevance_boost(op: &Opinion, query_tokens: &std::collections::HashSet<String>) -> f64 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let topic_hits = tokenize(&op.topic).intersection(query_tokens).count() as f64;
+    let text_hits = tokenize(&op.opinion).intersection(query_tokens).count() as f64;
+    (topic_hits * TOPIC_TOKEN_WEIGHT + text_hits * TEXT_TOKEN_WEIGHT).min(RELEVANCE_CAP)
+}
+
+fn score_opinion(
+    op: &Opinion,
+    query_tokens: &std::collections::HashSet<String>,
+    today: chrono::NaiveDate,
+) -> f64 {
+    op.times_seen as f64
+        * recency_weight(&op.last_seen, today)
+        * (1.0 + relevance_boost(op, query_tokens))
+}
+
+/// Top opinions for the prompt, best first.
+pub fn select_opinions<'a>(
+    opinions: &'a [Opinion],
+    query: Option<&str>,
+    today: chrono::NaiveDate,
+    limit: usize,
+) -> Vec<&'a Opinion> {
+    let query_tokens = query.map(tokenize).unwrap_or_default();
+    let mut scored: Vec<(f64, &Opinion)> = opinions
+        .iter()
+        .map(|o| (score_opinion(o, &query_tokens, today), o))
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, o)| o)
+        .collect()
+}
+
+/// Canonical topic key: lowercase, trimmed, whitespace runs become one `_`.
+/// Keeps model-invented variants like "Twitter Usage" from fragmenting
+/// conviction across duplicate opinions.
+pub fn canonicalize_topic(topic: &str) -> String {
+    topic
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// One-time in-memory migration: canonicalize stored topic keys and fold
+/// any duplicates that collapse to the same key. Legacy brains predate
+/// canonical keys; without this, saves and reflection merges can never
+/// match them.
+fn normalize_opinions(opinions: &mut Vec<Opinion>) {
+    use std::collections::HashMap;
+    let mut by_key: HashMap<String, Opinion> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for mut op in opinions.drain(..) {
+        op.topic = canonicalize_topic(&op.topic);
+        match by_key.get_mut(&op.topic) {
+            Some(existing) => {
+                existing.times_seen += op.times_seen;
+                if op.first_seen < existing.first_seen {
+                    existing.first_seen = op.first_seen;
+                }
+                if op.last_seen > existing.last_seen {
+                    existing.last_seen = op.last_seen.clone();
+                    existing.opinion = op.opinion;
+                    existing.category = op.category;
+                }
+            }
+            None => {
+                order.push(op.topic.clone());
+                by_key.insert(op.topic.clone(), op);
+            }
+        }
+    }
+    *opinions = order.into_iter().filter_map(|k| by_key.remove(&k)).collect();
 }
 
 pub fn load_brain() -> SheepBrain {
@@ -95,6 +219,7 @@ pub fn load_brain() -> SheepBrain {
     }
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut brain: SheepBrain = serde_json::from_str(&content).unwrap_or_default();
+    normalize_opinions(&mut brain.opinions);
 
     // Reset daily counts if it's a new day
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -114,6 +239,23 @@ fn save_brain(brain: &SheepBrain) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Locked load → mutate → save. The reflection pass uses this so its writes
+/// can't drop a concurrent commentary tick's opinion update.
+pub fn update_brain<F: FnOnce(&mut SheepBrain)>(f: F) -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = BRAIN_LOCK.lock().unwrap();
+    let mut brain = load_brain();
+    f(&mut brain);
+    save_brain(&brain)
+}
+
+/// One-generation backup before a reflection pass touches opinions.
+pub fn snapshot_opinions() {
+    let src = opinions_path();
+    if src.exists() {
+        fs::copy(&src, sheep_dir().join("opinions.json.bak")).ok();
+    }
+}
+
 /// Called by the AI to save or update an opinion.
 /// If topic already exists, updates the opinion text and increments the count.
 /// If new, creates it.
@@ -123,6 +265,7 @@ pub fn save_opinion(
     category: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _guard = BRAIN_LOCK.lock().unwrap();
+    let topic = canonicalize_topic(topic);
     let mut brain = load_brain();
     let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -227,23 +370,47 @@ pub fn get_today_journal() -> Result<String, Box<dyn std::error::Error>> {
     Ok(tail_at_char_boundary(&content, 2000).to_string())
 }
 
+/// Full journal text for a specific day, if that day has entries.
+pub fn read_journal_for(date: &str) -> Option<String> {
+    fs::read_to_string(journal_dir().join(format!("{}.md", date))).ok()
+}
+
+/// All journal dates on disk, oldest first.
+pub fn list_journal_days() -> Vec<String> {
+    list_journal_days_in(&journal_dir())
+}
+
+fn list_journal_days_in(dir: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut days: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| e.path().file_stem().and_then(|s| s.to_str()).map(String::from))
+        .filter(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok())
+        .collect();
+    days.sort();
+    days
+}
+
 // ═══════════════════════════════════════════════════════════
 // Combined Context — what gets fed to the model
 // ═══════════════════════════════════════════════════════════
 
 /// Build the full context for the AI: opinions + daily counts + recent journal.
 /// This is what lets the sheep feel like it *knows* you.
-pub fn get_recent_context() -> Result<String, Box<dyn std::error::Error>> {
+/// `query` (screen text or chat message) steers which opinions surface.
+pub fn get_recent_context(query: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     let mut parts = Vec::new();
     let brain = load_brain();
 
-    // 1. Opinions — sorted by conviction (times_seen), strongest first
+    // 1. Opinions — scored by conviction × recency × relevance, best first
     if !brain.opinions.is_empty() {
-        let mut sorted = brain.opinions.clone();
-        sorted.sort_by(|a, b| b.times_seen.cmp(&a.times_seen));
+        let today = Local::now().date_naive();
+        let selected = select_opinions(&brain.opinions, query, today, MAX_CONTEXT_OPINIONS);
 
         let mut opinion_lines: Vec<String> = Vec::new();
-        for op in sorted.iter().take(20) {
+        for op in selected {
             opinion_lines.push(format!(
                 "- [{}] {} (seen {} times, last: {})",
                 op.topic, op.opinion, op.times_seen, op.last_seen
@@ -306,15 +473,130 @@ pub fn get_brain_for_display() -> serde_json::Value {
     })
 }
 
-// ═══════════════════════════════════════════════════════════
-// Backward compat — old memory.md migration
-// ═══════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Returns old memory.md content for migration/display, then can be removed
-pub fn get_long_term_memory() -> String {
-    let path = sheep_dir().join("memory.md");
-    if !path.exists() {
-        return String::new();
+    fn opinion(topic: &str, text: &str, times_seen: u32, last_seen: &str) -> Opinion {
+        Opinion {
+            topic: topic.into(),
+            opinion: text.into(),
+            times_seen,
+            first_seen: "2026-01-01".into(),
+            last_seen: last_seen.into(),
+            category: "habit".into(),
+        }
     }
-    fs::read_to_string(path).unwrap_or_default()
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 7, 4).unwrap()
+    }
+
+    #[test]
+    fn recency_halves_score_per_half_life() {
+        let fresh = opinion("a", "x", 10, "2026-07-04 10:00");
+        let two_weeks = opinion("b", "x", 10, "2026-06-20 10:00");
+        let none = std::collections::HashSet::new();
+        let s_fresh = score_opinion(&fresh, &none, today());
+        let s_old = score_opinion(&two_weeks, &none, today());
+        assert!((s_fresh - 10.0).abs() < 1e-9);
+        assert!((s_old - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unparseable_last_seen_scores_midpoint() {
+        let bad = opinion("a", "x", 10, "garbage");
+        let none = std::collections::HashSet::new();
+        assert!((score_opinion(&bad, &none, today()) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stale_strong_opinion_loses_to_fresh_relevant_one() {
+        // Strong stale opinion vs weak fresh one that matches the query
+        let strong = opinion("tab_hoarding", "hoards tabs", 40, "2026-03-01 10:00");
+        let weak = opinion("twitter_usage", "always on twitter", 3, "2026-07-03 10:00");
+        let ops = vec![strong, weak];
+        let picked = select_opinions(&ops, Some("Twitter home timeline trending"), today(), 20);
+        assert_eq!(picked[0].topic, "twitter_usage");
+    }
+
+    #[test]
+    fn relevance_boost_is_capped() {
+        let op = opinion("twitter_usage", "twitter twitter twitter", 1, "2026-07-04 10:00");
+        let q = tokenize("twitter usage twitter twitter");
+        assert!(relevance_boost(&op, &q) <= 2.0 + 1e-9);
+    }
+
+    #[test]
+    fn short_tokens_are_dropped() {
+        let toks = tokenize("Go is ok C no");
+        assert!(toks.is_empty());
+    }
+
+    #[test]
+    fn selection_caps_at_twenty() {
+        let ops: Vec<Opinion> = (0..30)
+            .map(|i| opinion(&format!("t{}", i), "x", i + 1, "2026-07-04 10:00"))
+            .collect();
+        let picked = select_opinions(&ops, None, today(), 20);
+        assert_eq!(picked.len(), 20);
+        assert_eq!(picked[0].topic, "t29"); // highest conviction first
+    }
+
+    #[test]
+    fn canonicalize_lowercases_and_underscores() {
+        assert_eq!(canonicalize_topic("  Twitter Usage "), "twitter_usage");
+        assert_eq!(canonicalize_topic("dark_mode"), "dark_mode");
+        assert_eq!(canonicalize_topic("Tab   Hoarding"), "tab_hoarding");
+    }
+
+    #[test]
+    fn normalize_opinions_folds_legacy_topic_variants() {
+        let mut ops = vec![
+            Opinion {
+                topic: "Twitter Usage".into(),
+                opinion: "old text".into(),
+                times_seen: 5,
+                first_seen: "2026-02-01".into(),
+                last_seen: "2026-06-01 10:00".into(),
+                category: "habit".into(),
+            },
+            Opinion {
+                topic: "twitter_usage".into(),
+                opinion: "new text".into(),
+                times_seen: 3,
+                first_seen: "2026-03-01".into(),
+                last_seen: "2026-07-01 10:00".into(),
+                category: "habit".into(),
+            },
+            Opinion {
+                topic: "dark_mode".into(),
+                opinion: "likes it dark".into(),
+                times_seen: 1,
+                first_seen: "2026-04-01".into(),
+                last_seen: "2026-04-01 10:00".into(),
+                category: "fact".into(),
+            },
+        ];
+        normalize_opinions(&mut ops);
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].topic, "twitter_usage");
+        assert_eq!(ops[0].times_seen, 8);
+        assert_eq!(ops[0].first_seen, "2026-02-01");
+        assert_eq!(ops[0].last_seen, "2026-07-01 10:00");
+        assert_eq!(ops[0].opinion, "new text");
+        assert_eq!(ops[1].topic, "dark_mode");
+    }
+
+    #[test]
+    fn lists_journal_days_sorted_ignoring_strays() {
+        let dir = std::env::temp_dir().join(format!("co-sheep-journal-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["2026-07-02.md", "2026-06-30.md", "notes.md", "2026-07-01.md"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        let days = list_journal_days_in(&dir);
+        assert_eq!(days, vec!["2026-06-30", "2026-07-01", "2026-07-02"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -249,8 +249,10 @@ export class DramaManager {
     this.aiNarrationCooldownUntil = Date.now() + AI_NARRATION_COOLDOWN_MS;
 
     invoke<string>("friend_ai_chat", {
+      friendAId: t.idA,
       friendAName: a.sheep.name,
       friendAPersonality: a.personality,
+      friendBId: t.idB,
       friendBName: b.sheep.name,
       friendBPersonality: b.personality,
       topic: `their relationship just changed from ${t.from} to ${t.to} because of ${t.cause}`,
