@@ -11,7 +11,7 @@ static BRAIN_LOCK: Mutex<()> = Mutex::new(());
 
 /// Last `max_bytes` of `s`, cut forward to a char boundary so slicing
 /// never panics on multibyte UTF-8 (the journal is full of æ/ø/å).
-fn tail_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+pub(crate) fn tail_at_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
@@ -74,6 +74,12 @@ pub struct SheepBrain {
     pub total_comments: u32,
     /// Total user interactions (pets, double-clicks, file drops)
     pub total_interactions: u32,
+    /// Date the daily reflection pass last ran (or was marked done)
+    #[serde(default)]
+    pub last_reflection_date: String,
+    /// Last journal date processed by the historical backfill
+    #[serde(default)]
+    pub backfill_cursor: String,
 }
 
 impl Default for SheepBrain {
@@ -84,6 +90,8 @@ impl Default for SheepBrain {
             counts_date: Local::now().format("%Y-%m-%d").to_string(),
             total_comments: 0,
             total_interactions: 0,
+            last_reflection_date: String::new(),
+            backfill_cursor: String::new(),
         }
     }
 }
@@ -198,6 +206,23 @@ fn save_brain(brain: &SheepBrain) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Locked load → mutate → save. The reflection pass uses this so its writes
+/// can't drop a concurrent commentary tick's opinion update.
+pub fn update_brain<F: FnOnce(&mut SheepBrain)>(f: F) -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = BRAIN_LOCK.lock().unwrap();
+    let mut brain = load_brain();
+    f(&mut brain);
+    save_brain(&brain)
+}
+
+/// One-generation backup before a reflection pass touches opinions.
+pub fn snapshot_opinions() {
+    let src = opinions_path();
+    if src.exists() {
+        fs::copy(&src, sheep_dir().join("opinions.json.bak")).ok();
+    }
+}
+
 /// Called by the AI to save or update an opinion.
 /// If topic already exists, updates the opinion text and increments the count.
 /// If new, creates it.
@@ -310,6 +335,29 @@ pub fn get_today_journal() -> Result<String, Box<dyn std::error::Error>> {
 
     let content = fs::read_to_string(&path)?;
     Ok(tail_at_char_boundary(&content, 2000).to_string())
+}
+
+/// Full journal text for a specific day, if that day has entries.
+pub fn read_journal_for(date: &str) -> Option<String> {
+    fs::read_to_string(journal_dir().join(format!("{}.md", date))).ok()
+}
+
+/// All journal dates on disk, oldest first.
+pub fn list_journal_days() -> Vec<String> {
+    list_journal_days_in(&journal_dir())
+}
+
+fn list_journal_days_in(dir: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut days: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| e.path().file_stem().and_then(|s| s.to_str()).map(String::from))
+        .filter(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok())
+        .collect();
+    days.sort();
+    days
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -481,5 +529,17 @@ mod tests {
         assert_eq!(canonicalize_topic("  Twitter Usage "), "twitter_usage");
         assert_eq!(canonicalize_topic("dark_mode"), "dark_mode");
         assert_eq!(canonicalize_topic("Tab   Hoarding"), "tab_hoarding");
+    }
+
+    #[test]
+    fn lists_journal_days_sorted_ignoring_strays() {
+        let dir = std::env::temp_dir().join(format!("co-sheep-journal-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["2026-07-02.md", "2026-06-30.md", "notes.md", "2026-07-01.md"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        let days = list_journal_days_in(&dir);
+        assert_eq!(days, vec!["2026-06-30", "2026-07-01", "2026-07-02"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
