@@ -9,6 +9,7 @@ mod memory;
 mod onboarding;
 mod permissions;
 mod personality;
+mod reflect;
 mod screen_info;
 mod vision;
 mod weather;
