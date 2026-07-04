@@ -1087,8 +1087,10 @@ export class Flock {
     this.conversationCooldown = 60000; // prevent template convos while waiting
 
     invoke<string>("friend_ai_chat", {
+      friendAId: idA,
       friendAName: entryA.sheep.name,
       friendAPersonality: entryA.personality,
+      friendBId: idB,
       friendBName: entryB.sheep.name,
       friendBPersonality: entryB.personality,
     }).then((raw) => {

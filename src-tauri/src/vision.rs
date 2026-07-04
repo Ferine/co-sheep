@@ -448,13 +448,20 @@ pub async fn chat_with_sheep(
 // ─── Friend-to-friend AI chat ────────────────────────────────────────────────
 
 pub async fn friend_chat(
+    friend_a_id: &str,
     friend_a_name: &str,
     friend_a_personality: &str,
+    friend_b_id: &str,
     friend_b_name: &str,
     friend_b_personality: &str,
     topic: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let language = crate::onboarding::get_language();
+    let memory_section = format!(
+        "{}\n{}",
+        crate::friend_memory::get_chat_context(friend_a_id, friend_b_id),
+        crate::friend_memory::get_chat_context(friend_b_id, friend_a_id),
+    );
 
     let system_prompt = format!(
         r#"You are writing a short conversation between two desktop sheep friends.
@@ -466,12 +473,17 @@ LANGUAGE: Write in {lang}.
 Reply with ONLY a JSON array, no markdown:
 [{{"speaker": "{a}", "text": "...", "animation": "bounce"}}, {{"speaker": "{b}", "text": "...", "animation": null}}]
 
-Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null"#,
+Valid animations: "bounce", "spin", "headshake", "vibrate", "zoom", null
+
+WHAT THEY KNOW:
+{mem}
+Let their history color the exchange subtly — a callback, a grudge, warmth. Don't recite it."#,
         a = friend_a_name,
         pa = friend_a_personality,
         b = friend_b_name,
         pb = friend_b_personality,
         lang = language,
+        mem = memory_section,
     );
 
     let user_msg = match topic {

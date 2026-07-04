@@ -441,19 +441,6 @@ pub fn get_brain_for_display() -> serde_json::Value {
     })
 }
 
-// ═══════════════════════════════════════════════════════════
-// Backward compat — old memory.md migration
-// ═══════════════════════════════════════════════════════════
-
-/// Returns old memory.md content for migration/display, then can be removed
-pub fn get_long_term_memory() -> String {
-    let path = sheep_dir().join("memory.md");
-    if !path.exists() {
-        return String::new();
-    }
-    fs::read_to_string(path).unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
