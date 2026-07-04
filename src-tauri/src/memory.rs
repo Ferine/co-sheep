@@ -88,6 +88,78 @@ impl Default for SheepBrain {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// Opinion scoring — conviction × recency × relevance.
+// Selection for the prompt context; nothing here touches disk.
+// ═══════════════════════════════════════════════════════════
+
+const RECENCY_HALF_LIFE_DAYS: f64 = 14.0;
+const RELEVANCE_CAP: f64 = 2.0;
+const MAX_CONTEXT_OPINIONS: usize = 20;
+const TOPIC_TOKEN_WEIGHT: f64 = 1.0;
+const TEXT_TOKEN_WEIGHT: f64 = 0.5;
+
+fn tokenize(s: &str) -> std::collections::HashSet<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+/// 0.5^(days_idle / half-life). Unparseable last_seen scores the midpoint —
+/// neither fresh nor ancient.
+fn recency_weight(last_seen: &str, today: chrono::NaiveDate) -> f64 {
+    let Some(date) = last_seen
+        .get(..10)
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+    else {
+        return 0.5;
+    };
+    let days = (today - date).num_days().max(0) as f64;
+    0.5_f64.powf(days / RECENCY_HALF_LIFE_DAYS)
+}
+
+/// Token overlap between the query and the opinion; topic-key tokens weigh
+/// double text tokens. Capped so relevance can re-rank but not dominate.
+fn relevance_boost(op: &Opinion, query_tokens: &std::collections::HashSet<String>) -> f64 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let topic_hits = tokenize(&op.topic).intersection(query_tokens).count() as f64;
+    let text_hits = tokenize(&op.opinion).intersection(query_tokens).count() as f64;
+    (topic_hits * TOPIC_TOKEN_WEIGHT + text_hits * TEXT_TOKEN_WEIGHT).min(RELEVANCE_CAP)
+}
+
+fn score_opinion(
+    op: &Opinion,
+    query_tokens: &std::collections::HashSet<String>,
+    today: chrono::NaiveDate,
+) -> f64 {
+    op.times_seen as f64
+        * recency_weight(&op.last_seen, today)
+        * (1.0 + relevance_boost(op, query_tokens))
+}
+
+/// Top opinions for the prompt, best first.
+pub fn select_opinions<'a>(
+    opinions: &'a [Opinion],
+    query: Option<&str>,
+    today: chrono::NaiveDate,
+) -> Vec<&'a Opinion> {
+    let query_tokens = query.map(tokenize).unwrap_or_default();
+    let mut scored: Vec<(f64, &Opinion)> = opinions
+        .iter()
+        .map(|o| (score_opinion(o, &query_tokens, today), o))
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+        .into_iter()
+        .take(MAX_CONTEXT_OPINIONS)
+        .map(|(_, o)| o)
+        .collect()
+}
+
 pub fn load_brain() -> SheepBrain {
     let path = opinions_path();
     if !path.exists() {
@@ -317,4 +389,75 @@ pub fn get_long_term_memory() -> String {
         return String::new();
     }
     fs::read_to_string(path).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opinion(topic: &str, text: &str, times_seen: u32, last_seen: &str) -> Opinion {
+        Opinion {
+            topic: topic.into(),
+            opinion: text.into(),
+            times_seen,
+            first_seen: "2026-01-01".into(),
+            last_seen: last_seen.into(),
+            category: "habit".into(),
+        }
+    }
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 7, 4).unwrap()
+    }
+
+    #[test]
+    fn recency_halves_score_per_half_life() {
+        let fresh = opinion("a", "x", 10, "2026-07-04 10:00");
+        let two_weeks = opinion("b", "x", 10, "2026-06-20 10:00");
+        let none = std::collections::HashSet::new();
+        let s_fresh = score_opinion(&fresh, &none, today());
+        let s_old = score_opinion(&two_weeks, &none, today());
+        assert!((s_fresh - 10.0).abs() < 1e-9);
+        assert!((s_old - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unparseable_last_seen_scores_midpoint() {
+        let bad = opinion("a", "x", 10, "garbage");
+        let none = std::collections::HashSet::new();
+        assert!((score_opinion(&bad, &none, today()) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stale_strong_opinion_loses_to_fresh_relevant_one() {
+        // Strong stale opinion vs weak fresh one that matches the query
+        let strong = opinion("tab_hoarding", "hoards tabs", 40, "2026-03-01 10:00");
+        let weak = opinion("twitter_usage", "always on twitter", 3, "2026-07-03 10:00");
+        let ops = vec![strong, weak];
+        let picked = select_opinions(&ops, Some("Twitter home timeline trending"), today());
+        assert_eq!(picked[0].topic, "twitter_usage");
+    }
+
+    #[test]
+    fn relevance_boost_is_capped() {
+        let op = opinion("twitter_usage", "twitter twitter twitter", 1, "2026-07-04 10:00");
+        let q = tokenize("twitter usage twitter twitter");
+        assert!(relevance_boost(&op, &q) <= 2.0 + 1e-9);
+    }
+
+    #[test]
+    fn short_tokens_are_dropped() {
+        let toks = tokenize("Go is ok C no");
+        assert!(toks.is_empty());
+    }
+
+    #[test]
+    fn selection_caps_at_twenty() {
+        let ops: Vec<Opinion> = (0..30)
+            .map(|i| opinion(&format!("t{}", i), "x", i + 1, "2026-07-04 10:00"))
+            .collect();
+        let picked = select_opinions(&ops, None, today());
+        assert_eq!(picked.len(), 20);
+        assert_eq!(picked[0].topic, "t29"); // highest conviction first
+    }
 }
