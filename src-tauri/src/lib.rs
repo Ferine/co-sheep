@@ -21,6 +21,9 @@ use tauri::{Emitter, Manager};
 
 pub static COMMENTARY_PAUSED: AtomicBool = AtomicBool::new(false);
 
+/// True while a vision-pipeline tick is running — reflection/backfill yield.
+pub static VISION_TICK_RUNNING: AtomicBool = AtomicBool::new(false);
+
 #[tauri::command]
 async fn check_onboarding() -> Result<bool, String> {
     let needs = onboarding::needs_onboarding().map_err(|e| e.to_string())?;
@@ -1010,6 +1013,12 @@ pub fn run() {
             let vision_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 vision::vision_loop(vision_handle).await;
+            });
+
+            // Spawn memory reflection loop (daily consolidation + backfill)
+            eprintln!("[co-sheep] Spawning reflection loop");
+            tauri::async_runtime::spawn(async move {
+                reflect::reflection_loop().await;
             });
 
             // Spawn frontmost-app watcher (feeds gossip & live reactions)

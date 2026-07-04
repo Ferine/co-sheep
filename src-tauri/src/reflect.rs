@@ -199,6 +199,123 @@ pub fn apply_ops(brain: &mut SheepBrain, ops: &[ReflectOp], policy: &ReflectPoli
     stats
 }
 
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// ~4k-token window: opinions and journal each get an explicit byte budget.
+const JOURNAL_BUDGET: usize = 2500;
+const MAX_PROMPT_OPINIONS: usize = 60;
+
+const REFLECT_SYSTEM: &str = "You are the memory-consolidation process for a desktop sheep. \
+You tidy the sheep's opinion list using its diary. Reply with ONLY valid JSON, no markdown.";
+
+pub fn build_reflection_prompt(opinions: &[Opinion], journal: &str, journal_label: &str) -> String {
+    let mut sorted: Vec<&Opinion> = opinions.iter().collect();
+    sorted.sort_by(|a, b| b.times_seen.cmp(&a.times_seen));
+    let op_lines: Vec<String> = sorted
+        .iter()
+        .take(MAX_PROMPT_OPINIONS)
+        .map(|o| {
+            format!(
+                "- [{}] {} (category: {}, seen {}x, last: {})",
+                o.topic, o.opinion, o.category, o.times_seen, o.last_seen
+            )
+        })
+        .collect();
+    let journal_tail = memory::tail_at_char_boundary(journal, JOURNAL_BUDGET);
+
+    format!(
+        r#"Current opinions:
+{}
+
+{}:
+{}
+
+Tidy the opinions:
+- merge: topics that mean the same thing
+- update: opinion text the diary shows is outdated
+- prune: opinions that no longer matter
+- add: a clear recurring pattern in the diary that has no opinion yet
+
+Reply with JSON only:
+{{"ops": [
+  {{"op": "merge", "from": ["key_a", "key_b"], "into": "key_a", "text": "combined opinion"}},
+  {{"op": "update", "topic": "key", "text": "new text"}},
+  {{"op": "prune", "topic": "key"}},
+  {{"op": "add", "topic": "new_key", "text": "opinion text", "category": "habit"}}
+]}}
+If nothing needs tidying: {{"ops": []}}"#,
+        op_lines.join("\n"),
+        journal_label,
+        journal_tail
+    )
+}
+
+/// One generate → parse → snapshot → apply cycle over a day's journal.
+async fn reflect_once(
+    opinions: &[Opinion],
+    journal: &str,
+    label: &str,
+    policy: ReflectPolicy,
+) -> Result<ApplyStats, BoxError> {
+    let prompt = build_reflection_prompt(opinions, journal, label);
+    let raw = crate::apple_ai::generate(REFLECT_SYSTEM, &prompt).await?;
+    let ops = parse_ops(&raw)?;
+    memory::snapshot_opinions();
+    let mut stats = ApplyStats::default();
+    memory::update_brain(|b| {
+        stats = apply_ops(b, &ops, &policy);
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(stats)
+}
+
+/// Consolidate yesterday's journal into the opinion list. Runs once per
+/// calendar day; the date is marked *before* the model call so a garbage
+/// output retries tomorrow, never in a loop.
+pub async fn run_daily_reflection() {
+    let today = chrono::Local::now().date_naive();
+    let today_str = today.format("%Y-%m-%d").to_string();
+    let brain = memory::load_brain();
+    if brain.last_reflection_date == today_str {
+        return;
+    }
+
+    let marked = today_str.clone();
+    if memory::update_brain(move |b| b.last_reflection_date = marked).is_err() {
+        return;
+    }
+
+    let yesterday = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let Some(journal) = memory::read_journal_for(&yesterday) else {
+        eprintln!("[co-sheep] Reflection: no journal for {}, nothing to tidy", yesterday);
+        return;
+    };
+
+    eprintln!("[co-sheep] Reflection: consolidating {}", yesterday);
+    let label = format!("Diary for {}", yesterday);
+    match reflect_once(&brain.opinions, &journal, &label, ReflectPolicy::daily(today)).await {
+        Ok(stats) => {
+            eprintln!("[co-sheep] Reflection applied: {:?}", stats);
+            memory::append_journal("*Slept on it. Tidied my thoughts.*").ok();
+        }
+        Err(e) => eprintln!("[co-sheep] Reflection failed (retry tomorrow): {}", e),
+    }
+}
+
+const LOOP_INTERVAL_SECS: u64 = 180;
+
+/// Background loop: daily reflection, then (Task 7) one backfill step per
+/// interval — only while the vision pipeline isn't mid-tick.
+pub async fn reflection_loop() {
+    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+    loop {
+        if !crate::VISION_TICK_RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
+            run_daily_reflection().await;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(LOOP_INTERVAL_SECS)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +458,32 @@ mod tests {
         assert_eq!(stats.skipped, 1);
         assert_eq!(b.opinions[0].opinion, "new view");
         assert_eq!(b.opinions[0].times_seen, 3);
+    }
+
+    #[test]
+    fn reflection_prompt_lists_opinions_and_journal() {
+        let ops = vec![opinion("twitter_usage", 5, "2026-07-01 10:00")];
+        let p = build_reflection_prompt(&ops, "## 10:00 AM\nScrolled twitter again.", "Diary for 2026-07-03");
+        assert!(p.contains("[twitter_usage]"));
+        assert!(p.contains("Scrolled twitter again."));
+        assert!(p.contains("Diary for 2026-07-03"));
+        assert!(p.contains(r#""ops""#));
+    }
+
+    #[test]
+    fn reflection_prompt_budgets_long_journals() {
+        let ops = vec![opinion("a", 1, "2026-07-01 10:00")];
+        let huge = "baa ".repeat(2000); // 8000 bytes
+        let p = build_reflection_prompt(&ops, &huge, "Diary");
+        assert!(p.len() < 6500);
+    }
+
+    #[test]
+    fn reflection_prompt_caps_opinion_count() {
+        let many: Vec<Opinion> = (0..80).map(|i| opinion(&format!("t{}", i), i, "2026-07-01 10:00")).collect();
+        let p = build_reflection_prompt(&many, "x", "Diary");
+        // Strongest survive the cap; weakest are cut
+        assert!(p.contains("[t79]"));
+        assert!(!p.contains("[t0]"));
     }
 }

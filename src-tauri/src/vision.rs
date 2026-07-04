@@ -138,6 +138,15 @@ async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
 pub async fn run_vision_pipeline(
     app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    struct TickGuard;
+    impl Drop for TickGuard {
+        fn drop(&mut self) {
+            crate::VISION_TICK_RUNNING.store(false, Ordering::Relaxed);
+        }
+    }
+    crate::VISION_TICK_RUNNING.store(true, Ordering::Relaxed);
+    let _tick_guard = TickGuard;
+
     eprintln!("[co-sheep] --- Vision pipeline tick ---");
 
     // Log preflight status but don't block — actual capture is the real test
