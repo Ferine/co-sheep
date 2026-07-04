@@ -204,16 +204,20 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// ~4k-token window: opinions and journal each get an explicit byte budget.
 const JOURNAL_BUDGET: usize = 2500;
 const MAX_PROMPT_OPINIONS: usize = 60;
+const GENERATE_TIMEOUT_SECS: u64 = 120;
 
 const REFLECT_SYSTEM: &str = "You are the memory-consolidation process for a desktop sheep. \
 You tidy the sheep's opinion list using its diary. Reply with ONLY valid JSON, no markdown.";
 
 pub fn build_reflection_prompt(opinions: &[Opinion], journal: &str, journal_label: &str) -> String {
-    let mut sorted: Vec<&Opinion> = opinions.iter().collect();
-    sorted.sort_by(|a, b| b.times_seen.cmp(&a.times_seen));
-    let op_lines: Vec<String> = sorted
+    let selected = memory::select_opinions(
+        opinions,
+        None,
+        chrono::Local::now().date_naive(),
+        MAX_PROMPT_OPINIONS,
+    );
+    let op_lines: Vec<String> = selected
         .iter()
-        .take(MAX_PROMPT_OPINIONS)
         .map(|o| {
             format!(
                 "- [{}] {} (category: {}, seen {}x, last: {})",
@@ -258,7 +262,12 @@ async fn reflect_once(
     policy: ReflectPolicy,
 ) -> Result<ApplyStats, BoxError> {
     let prompt = build_reflection_prompt(opinions, journal, label);
-    let raw = crate::apple_ai::generate(REFLECT_SYSTEM, &prompt).await?;
+    let raw = tokio::time::timeout(
+        std::time::Duration::from_secs(GENERATE_TIMEOUT_SECS),
+        crate::apple_ai::generate(REFLECT_SYSTEM, &prompt),
+    )
+    .await
+    .map_err(|_| format!("reflection generate timed out after {}s", GENERATE_TIMEOUT_SECS))??;
     let ops = parse_ops(&raw)?;
     memory::snapshot_opinions();
     let mut stats = ApplyStats::default();
@@ -302,10 +311,11 @@ pub async fn run_daily_reflection() {
     }
 }
 
-/// Oldest journal day after the cursor, strictly before today.
-pub fn pending_backfill_day(days: &[String], cursor: &str, today: &str) -> Option<String> {
+/// Oldest journal day after the cursor, strictly before `before` (exclusive
+/// upper bound — the daily reflection pass owns yesterday).
+pub fn pending_backfill_day(days: &[String], cursor: &str, before: &str) -> Option<String> {
     days.iter()
-        .find(|d| d.as_str() > cursor && d.as_str() < today)
+        .find(|d| d.as_str() > cursor && d.as_str() < before)
         .cloned()
 }
 
@@ -314,10 +324,10 @@ pub fn pending_backfill_day(days: &[String], cursor: &str, today: &str) -> Optio
 /// day is skipped, not retried forever.
 pub async fn run_backfill_step() -> bool {
     let today = chrono::Local::now().date_naive();
-    let today_str = today.format("%Y-%m-%d").to_string();
+    let yesterday_str = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
     let brain = memory::load_brain();
     let days = memory::list_journal_days();
-    let Some(day) = pending_backfill_day(&days, &brain.backfill_cursor, &today_str) else {
+    let Some(day) = pending_backfill_day(&days, &brain.backfill_cursor, &yesterday_str) else {
         return false;
     };
 
@@ -525,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_picks_oldest_unprocessed_day_before_today() {
+    fn backfill_picks_oldest_unprocessed_day_before_bound() {
         let days: Vec<String> =
             ["2026-06-30", "2026-07-01", "2026-07-03", "2026-07-04"].map(String::from).into();
         assert_eq!(pending_backfill_day(&days, "", "2026-07-04"), Some("2026-06-30".into()));
@@ -533,5 +543,9 @@ mod tests {
         assert_eq!(pending_backfill_day(&days, "2026-07-01", "2026-07-04"), Some("2026-07-03".into()));
         // Today is excluded; cursor at last eligible day means done
         assert_eq!(pending_backfill_day(&days, "2026-07-03", "2026-07-04"), None);
+        // Regression: bound = yesterday (today is 2026-07-04) must exclude
+        // yesterday itself — that day belongs to the daily reflection pass.
+        let two_day_gap: Vec<String> = ["2026-07-01", "2026-07-03"].map(String::from).into();
+        assert_eq!(pending_backfill_day(&two_day_gap, "2026-07-01", "2026-07-03"), None);
     }
 }

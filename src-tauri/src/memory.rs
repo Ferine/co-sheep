@@ -154,6 +154,7 @@ pub fn select_opinions<'a>(
     opinions: &'a [Opinion],
     query: Option<&str>,
     today: chrono::NaiveDate,
+    limit: usize,
 ) -> Vec<&'a Opinion> {
     let query_tokens = query.map(tokenize).unwrap_or_default();
     let mut scored: Vec<(f64, &Opinion)> = opinions
@@ -163,7 +164,7 @@ pub fn select_opinions<'a>(
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored
         .into_iter()
-        .take(MAX_CONTEXT_OPINIONS)
+        .take(limit)
         .map(|(_, o)| o)
         .collect()
 }
@@ -180,6 +181,37 @@ pub fn canonicalize_topic(topic: &str) -> String {
         .join("_")
 }
 
+/// One-time in-memory migration: canonicalize stored topic keys and fold
+/// any duplicates that collapse to the same key. Legacy brains predate
+/// canonical keys; without this, saves and reflection merges can never
+/// match them.
+fn normalize_opinions(opinions: &mut Vec<Opinion>) {
+    use std::collections::HashMap;
+    let mut by_key: HashMap<String, Opinion> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for mut op in opinions.drain(..) {
+        op.topic = canonicalize_topic(&op.topic);
+        match by_key.get_mut(&op.topic) {
+            Some(existing) => {
+                existing.times_seen += op.times_seen;
+                if op.first_seen < existing.first_seen {
+                    existing.first_seen = op.first_seen;
+                }
+                if op.last_seen > existing.last_seen {
+                    existing.last_seen = op.last_seen.clone();
+                    existing.opinion = op.opinion;
+                    existing.category = op.category;
+                }
+            }
+            None => {
+                order.push(op.topic.clone());
+                by_key.insert(op.topic.clone(), op);
+            }
+        }
+    }
+    *opinions = order.into_iter().filter_map(|k| by_key.remove(&k)).collect();
+}
+
 pub fn load_brain() -> SheepBrain {
     let path = opinions_path();
     if !path.exists() {
@@ -187,6 +219,7 @@ pub fn load_brain() -> SheepBrain {
     }
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut brain: SheepBrain = serde_json::from_str(&content).unwrap_or_default();
+    normalize_opinions(&mut brain.opinions);
 
     // Reset daily counts if it's a new day
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -366,16 +399,15 @@ fn list_journal_days_in(dir: &std::path::Path) -> Vec<String> {
 
 /// Build the full context for the AI: opinions + daily counts + recent journal.
 /// This is what lets the sheep feel like it *knows* you.
-/// Build the full context for the AI: opinions + daily counts + recent journal.
 /// `query` (screen text or chat message) steers which opinions surface.
 pub fn get_recent_context(query: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     let mut parts = Vec::new();
     let brain = load_brain();
 
-    // 1. Opinions — sorted by conviction (times_seen), strongest first
+    // 1. Opinions — scored by conviction × recency × relevance, best first
     if !brain.opinions.is_empty() {
         let today = Local::now().date_naive();
-        let selected = select_opinions(&brain.opinions, query, today);
+        let selected = select_opinions(&brain.opinions, query, today, MAX_CONTEXT_OPINIONS);
 
         let mut opinion_lines: Vec<String> = Vec::new();
         for op in selected {
@@ -484,7 +516,7 @@ mod tests {
         let strong = opinion("tab_hoarding", "hoards tabs", 40, "2026-03-01 10:00");
         let weak = opinion("twitter_usage", "always on twitter", 3, "2026-07-03 10:00");
         let ops = vec![strong, weak];
-        let picked = select_opinions(&ops, Some("Twitter home timeline trending"), today());
+        let picked = select_opinions(&ops, Some("Twitter home timeline trending"), today(), 20);
         assert_eq!(picked[0].topic, "twitter_usage");
     }
 
@@ -506,7 +538,7 @@ mod tests {
         let ops: Vec<Opinion> = (0..30)
             .map(|i| opinion(&format!("t{}", i), "x", i + 1, "2026-07-04 10:00"))
             .collect();
-        let picked = select_opinions(&ops, None, today());
+        let picked = select_opinions(&ops, None, today(), 20);
         assert_eq!(picked.len(), 20);
         assert_eq!(picked[0].topic, "t29"); // highest conviction first
     }
@@ -516,6 +548,44 @@ mod tests {
         assert_eq!(canonicalize_topic("  Twitter Usage "), "twitter_usage");
         assert_eq!(canonicalize_topic("dark_mode"), "dark_mode");
         assert_eq!(canonicalize_topic("Tab   Hoarding"), "tab_hoarding");
+    }
+
+    #[test]
+    fn normalize_opinions_folds_legacy_topic_variants() {
+        let mut ops = vec![
+            Opinion {
+                topic: "Twitter Usage".into(),
+                opinion: "old text".into(),
+                times_seen: 5,
+                first_seen: "2026-02-01".into(),
+                last_seen: "2026-06-01 10:00".into(),
+                category: "habit".into(),
+            },
+            Opinion {
+                topic: "twitter_usage".into(),
+                opinion: "new text".into(),
+                times_seen: 3,
+                first_seen: "2026-03-01".into(),
+                last_seen: "2026-07-01 10:00".into(),
+                category: "habit".into(),
+            },
+            Opinion {
+                topic: "dark_mode".into(),
+                opinion: "likes it dark".into(),
+                times_seen: 1,
+                first_seen: "2026-04-01".into(),
+                last_seen: "2026-04-01 10:00".into(),
+                category: "fact".into(),
+            },
+        ];
+        normalize_opinions(&mut ops);
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].topic, "twitter_usage");
+        assert_eq!(ops[0].times_seen, 8);
+        assert_eq!(ops[0].first_seen, "2026-02-01");
+        assert_eq!(ops[0].last_seen, "2026-07-01 10:00");
+        assert_eq!(ops[0].opinion, "new text");
+        assert_eq!(ops[1].topic, "dark_mode");
     }
 
     #[test]
