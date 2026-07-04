@@ -305,17 +305,19 @@ pub fn get_today_journal() -> Result<String, Box<dyn std::error::Error>> {
 
 /// Build the full context for the AI: opinions + daily counts + recent journal.
 /// This is what lets the sheep feel like it *knows* you.
-pub fn get_recent_context() -> Result<String, Box<dyn std::error::Error>> {
+/// Build the full context for the AI: opinions + daily counts + recent journal.
+/// `query` (screen text or chat message) steers which opinions surface.
+pub fn get_recent_context(query: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     let mut parts = Vec::new();
     let brain = load_brain();
 
     // 1. Opinions — sorted by conviction (times_seen), strongest first
     if !brain.opinions.is_empty() {
-        let mut sorted = brain.opinions.clone();
-        sorted.sort_by(|a, b| b.times_seen.cmp(&a.times_seen));
+        let today = Local::now().date_naive();
+        let selected = select_opinions(&brain.opinions, query, today);
 
         let mut opinion_lines: Vec<String> = Vec::new();
-        for op in sorted.iter().take(20) {
+        for op in selected {
             opinion_lines.push(format!(
                 "- [{}] {} (seen {} times, last: {})",
                 op.topic, op.opinion, op.times_seen, op.last_seen
