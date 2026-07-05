@@ -226,6 +226,18 @@
     <script>
       const { invoke } = window.__TAURI__.core;
 
+      // Forward errors to the dev terminal; fire-and-forget
+      (() => {
+        const orig = console.error.bind(console);
+        console.error = (...args) => {
+          orig(...args);
+          try {
+            const message = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a) ?? String(a))).join(" ").slice(0, 500);
+            window.__TAURI__.core.invoke("frontend_log", { level: "error", message }).catch(() => {});
+          } catch {}
+        };
+      })();
+
       const nameInput = document.getElementById('name');
       const intervalSlider = document.getElementById('interval');
       const intervalLabel = document.getElementById('interval-label');

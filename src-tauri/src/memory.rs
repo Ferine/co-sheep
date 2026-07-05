@@ -277,8 +277,8 @@ pub fn save_opinion(
         if !opinion_text.is_empty() {
             existing.opinion = opinion_text.to_string();
         }
-        eprintln!(
-            "[co-sheep] Opinion updated: {} (seen {} times)",
+        log!(
+            "memory", "Opinion updated: {} (seen {} times)",
             topic, existing.times_seen
         );
     } else {
@@ -290,7 +290,7 @@ pub fn save_opinion(
             last_seen: now,
             category: category.to_string(),
         });
-        eprintln!("[co-sheep] New opinion formed: {}", topic);
+        log!("memory", "New opinion formed: {}", topic);
     }
 
     save_brain(&brain)

@@ -63,10 +63,10 @@ impl SheepHitState {
 /// Polls global cursor position ~20 times/sec.
 /// Toggles window click-through based on whether the cursor overlaps any character.
 pub async fn cursor_tracking_loop(app: tauri::AppHandle) {
-    eprintln!("[co-sheep] Cursor tracking loop started, waiting for sheep to spawn...");
+    log!("cursor", "Cursor tracking loop started, waiting for sheep to spawn...");
     // Wait for the sheep to spawn
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    eprintln!("[co-sheep] Cursor tracking active");
+    log!("cursor", "Cursor tracking active");
 
     let mut was_over = false;
 
@@ -91,8 +91,8 @@ pub async fn cursor_tracking_loop(app: tauri::AppHandle) {
 
             // Only log on state change to avoid spamming
             if over_any != was_over {
-                eprintln!(
-                    "[co-sheep] Cursor {} character (cursor: {:.0},{:.0})",
+                debug!(
+                    "cursor", "Cursor {} character (cursor: {:.0},{:.0})",
                     if over_any { "OVER" } else { "LEFT" },
                     cx, cy,
                 );

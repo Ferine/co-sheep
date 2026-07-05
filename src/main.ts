@@ -13,6 +13,35 @@ import { DramaManager } from "./drama-manager";
 import { GossipManager } from "./gossip";
 import "./styles.css";
 
+// Dev only: tee console + uncaught errors to the terminal via the backend.
+// Fire-and-forget — logging must never break the app.
+if (import.meta.env.DEV) {
+  const forward = (level: string, args: unknown[]) => {
+    try {
+      const message = args
+        .map((a) => (typeof a === "string" ? a : JSON.stringify(a) ?? String(a)))
+        .join(" ")
+        .slice(0, 500);
+      invoke("frontend_log", { level, message }).catch(() => {});
+    } catch {
+      // stringify can throw on cycles — drop the log line, never the app
+    }
+  };
+  for (const level of ["log", "warn", "error"] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      forward(level, args);
+    };
+  }
+  window.addEventListener("error", (e) =>
+    forward("error", [`uncaught: ${e.message} (${e.filename}:${e.lineno})`]),
+  );
+  window.addEventListener("unhandledrejection", (e) =>
+    forward("error", [`unhandled rejection: ${String(e.reason)}`]),
+  );
+}
+
 let flock: Flock;
 let dramaManager: DramaManager;
 let canvas: HTMLCanvasElement;

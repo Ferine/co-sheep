@@ -4,17 +4,18 @@ use image::DynamicImage;
 use xcap::Monitor;
 
 pub fn capture_screen() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    eprintln!("[co-sheep] Enumerating monitors...");
+    debug!("capture", "enumerating monitors...");
     let monitors = Monitor::all()?;
-    eprintln!("[co-sheep] Found {} monitor(s)", monitors.len());
+    debug!("capture", "found {} monitor(s)", monitors.len());
 
     let monitor = monitors.into_iter().next().ok_or("No monitor found")?;
-    eprintln!("[co-sheep] Capturing screen...");
+    debug!("capture", "capturing screen...");
     let screenshot = monitor.capture_image()?;
 
     let (orig_w, orig_h) = (screenshot.width(), screenshot.height());
-    eprintln!(
-        "[co-sheep] Captured {}x{} image, resizing...",
+    debug!(
+        "capture",
+        "captured {}x{} image, resizing...",
         orig_w, orig_h
     );
 
@@ -33,8 +34,9 @@ pub fn capture_screen() -> Result<String, Box<dyn std::error::Error + Send + Syn
     let encoder = JpegEncoder::new_with_quality(&mut buf, 70);
     resized.write_with_encoder(encoder)?;
 
-    eprintln!(
-        "[co-sheep] Encoded to JPEG: {}x{}, {} bytes",
+    debug!(
+        "capture",
+        "encoded to JPEG: {}x{}, {} bytes",
         new_w,
         new_h,
         buf.len()
@@ -42,7 +44,7 @@ pub fn capture_screen() -> Result<String, Box<dyn std::error::Error + Send + Syn
 
     // Base64 encode
     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
-    eprintln!("[co-sheep] Base64 encoded: {} chars", b64.len());
+    debug!("capture", "base64 encoded: {} chars", b64.len());
     Ok(b64)
 }
 
@@ -61,6 +63,6 @@ pub fn save_debug_screenshot() -> Result<String, Box<dyn std::error::Error + Sen
     dynamic.save(&path)?;
 
     let path_str = path.to_string_lossy().to_string();
-    eprintln!("[co-sheep] Debug screenshot saved to: {}", path_str);
+    log!("capture", "debug screenshot saved to: {}", path_str);
     Ok(path_str)
 }

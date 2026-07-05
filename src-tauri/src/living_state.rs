@@ -32,7 +32,7 @@ pub fn load_state(name: &str) -> Value {
 /// Persist a named JSON state blob to ~/.co-sheep/<name>.json.
 pub fn save_state(name: &str, value: &Value) {
     if !valid_name(name) {
-        eprintln!("[co-sheep] living_state: rejected name '{}'", name);
+        log!("state", "error: living_state: rejected name '{}'", name);
         return;
     }
     let path = state_path(name);
