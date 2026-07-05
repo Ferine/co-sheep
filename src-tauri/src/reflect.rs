@@ -305,18 +305,18 @@ pub async fn run_daily_reflection() {
     }
 
     let Some(journal) = memory::read_journal_for(&yesterday) else {
-        eprintln!("[co-sheep] Reflection: no journal for {}, nothing to tidy", yesterday);
+        log!("reflect", "Reflection: no journal for {}, nothing to tidy", yesterday);
         return;
     };
 
-    eprintln!("[co-sheep] Reflection: consolidating {}", yesterday);
+    log!("reflect", "Reflection: consolidating {}", yesterday);
     let label = format!("Diary for {}", yesterday);
     match reflect_once(&brain.opinions, &journal, &label, ReflectPolicy::daily(today)).await {
         Ok(stats) => {
-            eprintln!("[co-sheep] Reflection applied: {:?}", stats);
+            log!("reflect", "Reflection applied: {:?}", stats);
             memory::append_journal("*Slept on it. Tidied my thoughts.*").ok();
         }
-        Err(e) => eprintln!("[co-sheep] Reflection failed (retry tomorrow): {}", e),
+        Err(e) => log!("reflect", "error: Reflection failed (retry tomorrow): {}", e),
     }
 }
 
@@ -359,11 +359,11 @@ pub async fn run_backfill_step() -> bool {
     let Some(journal) = memory::read_journal_for(&day) else {
         return true;
     };
-    eprintln!("[co-sheep] Backfill: distilling journal {}", day);
+    log!("reflect", "Backfill: distilling journal {}", day);
     let label = format!("Diary for {}", day);
     match reflect_once(&brain.opinions, &journal, &label, ReflectPolicy::backfill(today)).await {
-        Ok(stats) => eprintln!("[co-sheep] Backfill {} applied: {:?}", day, stats),
-        Err(e) => eprintln!("[co-sheep] Backfill {} failed, skipped: {}", day, e),
+        Ok(stats) => log!("reflect", "Backfill {} applied: {:?}", day, stats),
+        Err(e) => log!("reflect", "error: Backfill {} failed, skipped: {}", day, e),
     }
     true
 }

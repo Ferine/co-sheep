@@ -29,28 +29,28 @@ pub static VISION_TICK_RUNNING: AtomicBool = AtomicBool::new(false);
 #[tauri::command]
 async fn check_onboarding() -> Result<bool, String> {
     let needs = onboarding::needs_onboarding().map_err(|e| e.to_string())?;
-    eprintln!("[co-sheep] Onboarding needed: {}", needs);
+    log!("app", "Onboarding needed: {}", needs);
     Ok(needs)
 }
 
 #[tauri::command]
 async fn save_sheep_name(app: tauri::AppHandle, name: String) -> Result<(), String> {
-    eprintln!("[co-sheep] Saving sheep name: {}", name);
+    log!("app", "Saving sheep name: {}", name);
     onboarding::save_config(&name).map_err(|e| e.to_string())?;
     app.emit("naming-complete", &name)
         .map_err(|e| e.to_string())?;
     if let Some(win) = app.get_webview_window("naming") {
         win.close().ok();
     }
-    eprintln!("[co-sheep] Naming complete, config saved");
+    log!("app", "Naming complete, config saved");
     Ok(())
 }
 
 #[tauri::command]
 async fn open_naming_window(app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[co-sheep] Opening naming window");
+    log!("app", "Opening naming window");
     if app.get_webview_window("naming").is_some() {
-        eprintln!("[co-sheep] Naming window already exists, skipping");
+        log!("app", "Naming window already exists, skipping");
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(
@@ -93,7 +93,7 @@ fn record_app_usage(category: String) -> u32 {
 
 #[tauri::command]
 async fn debug_capture(app: tauri::AppHandle) -> Result<String, String> {
-    eprintln!("[co-sheep] Debug capture requested");
+    log!("app", "Debug capture requested");
     match tokio::task::spawn_blocking(|| capture::save_debug_screenshot()).await {
         Ok(Ok(path)) => {
             app.emit("sheep-commentary", "Saved what I see to your Desktop! Check co-sheep-debug-capture.png")
@@ -116,7 +116,7 @@ async fn get_memory() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn open_memory_window(app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[co-sheep] Opening memory window");
+    log!("app", "Opening memory window");
     if let Some(win) = app.get_webview_window("memory") {
         win.set_focus().ok();
         return Ok(());
@@ -154,8 +154,8 @@ async fn save_settings(
     summer_mode: String,
     weather_location: String,
 ) -> Result<(), String> {
-    eprintln!(
-        "[co-sheep] Saving settings: name={}, personality={}, interval={}s, language={}",
+    log!(
+        "app", "Saving settings: name={}, personality={}, interval={}s, language={}",
         name, personality, interval_secs, language
     );
     // Preserve existing friends and accessories when saving settings
@@ -189,7 +189,7 @@ async fn save_settings(
 
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[co-sheep] Opening settings window");
+    log!("app", "Opening settings window");
     if let Some(win) = app.get_webview_window("settings") {
         win.set_focus().ok();
         return Ok(());
@@ -293,7 +293,7 @@ async fn add_friend(app: tauri::AppHandle, name: String, color: String, personal
         serde_json::json!({ "id": id, "name": name, "color": color, "personality": personality, "scale": scale }),
     )
     .map_err(|e| e.to_string())?;
-    eprintln!("[co-sheep] Added friend: {} ({}, {})", name, color, personality);
+    log!("app", "Added friend: {} ({}, {})", name, color, personality);
     Ok(())
 }
 
@@ -322,7 +322,7 @@ async fn save_friend_accessories(app: tauri::AppHandle, id: String, accessories:
     .map_err(|e| e.to_string())?;
     app.emit("friend-accessories-changed", serde_json::json!({ "id": id, "accessories": accessories }))
         .map_err(|e| e.to_string())?;
-    eprintln!("[co-sheep] Friend {} accessories saved", id);
+    log!("app", "Friend {} accessories saved", id);
     Ok(())
 }
 
@@ -335,13 +335,13 @@ async fn remove_friend(app: tauri::AppHandle, id: String) -> Result<(), String> 
     friend_memory::remove_brain(&id);
     app.emit("remove-friend", &id)
         .map_err(|e| e.to_string())?;
-    eprintln!("[co-sheep] Removed friend: {}", id);
+    log!("app", "Removed friend: {}", id);
     Ok(())
 }
 
 #[tauri::command]
 async fn open_friends_window(app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[co-sheep] Opening friends window");
+    log!("app", "Opening friends window");
     if let Some(win) = app.get_webview_window("friends") {
         win.set_focus().ok();
         return Ok(());
@@ -368,7 +368,7 @@ fn set_cursor_events(
     state: tauri::State<cursor::SheepHitState>,
     ignore: bool,
 ) {
-    eprintln!("[co-sheep] set_cursor_events: ignore={}", ignore);
+    log!("app", "set_cursor_events: ignore={}", ignore);
     state.is_input_active.store(!ignore, Ordering::Relaxed);
     if let Some(window) = app.get_webview_window("main") {
         window.set_ignore_cursor_events(ignore).ok();
@@ -380,9 +380,9 @@ async fn chat_with_sheep(
     message: String,
     history: Vec<vision::ChatTurn>,
 ) -> Result<vision::CommentaryEvent, String> {
-    eprintln!("[co-sheep] Chat request: {}", message);
+    log!("app", "Chat request: {}", message);
     vision::chat_with_sheep(&message, &history).await.map_err(|e| {
-        eprintln!("[co-sheep] Chat failed: {}", e);
+        log!("app", "error: Chat failed: {}", e);
         // One entry per settings.html language option
         match onboarding::get_language().to_lowercase().as_str() {
             "nynorsk" => "Bæææ... hjernen min verkar ikkje akkurat no. Prøv igjen?",
@@ -419,7 +419,7 @@ async fn save_moment(image_data: String) -> Result<String, String> {
         .join(format!("co-sheep-moment-{}.png", ts));
     std::fs::write(&path, bytes).map_err(|e| format!("Write error: {}", e))?;
     let p = path.to_string_lossy().to_string();
-    eprintln!("[co-sheep] Moment saved to {}", p);
+    log!("app", "Moment saved to {}", p);
     Ok(p)
 }
 
@@ -447,13 +447,13 @@ async fn save_accessories(app: tauri::AppHandle, accessories: Vec<String>) -> Re
         .map_err(|e| e.to_string())?;
     app.emit("accessories-changed", ())
         .map_err(|e| e.to_string())?;
-    eprintln!("[co-sheep] Accessories saved");
+    log!("app", "Accessories saved");
     Ok(())
 }
 
 #[tauri::command]
 async fn open_wardrobe_window(app: tauri::AppHandle) -> Result<(), String> {
-    eprintln!("[co-sheep] Opening wardrobe window");
+    log!("app", "Opening wardrobe window");
     if let Some(win) = app.get_webview_window("wardrobe") {
         win.set_focus().ok();
         return Ok(());
@@ -569,7 +569,7 @@ async fn friend_ai_chat(
     friend_b_personality: String,
     topic: Option<String>,
 ) -> Result<String, String> {
-    eprintln!("[co-sheep] Friend AI chat: {} ({}) <-> {} ({})", friend_a_name, friend_a_personality, friend_b_name, friend_b_personality);
+    log!("app", "Friend AI chat: {} ({}) <-> {} ({})", friend_a_name, friend_a_personality, friend_b_name, friend_b_personality);
     vision::friend_chat(&friend_a_id, &friend_a_name, &friend_a_personality, &friend_b_id, &friend_b_name, &friend_b_personality, topic.as_deref())
         .await
         .map_err(|e| e.to_string())
@@ -582,7 +582,7 @@ fn set_dragging(
     state: tauri::State<cursor::SheepHitState>,
     dragging: bool,
 ) {
-    eprintln!("[co-sheep] Drag state: {}", if dragging { "START" } else { "END" });
+    debug!("app", "Drag state: {}", if dragging { "START" } else { "END" });
     state.is_dragging.store(dragging, Ordering::Relaxed);
     // When drag ends, immediately restore click-through
     if !dragging {
@@ -641,26 +641,26 @@ pub fn run() {
             record_spectacle,
         ])
         .setup(|app| {
-            eprintln!("[co-sheep] === co-sheep starting ===");
+            log!("app", "=== co-sheep starting ===");
 
             // Main overlay — start click-through
             let window = app.get_webview_window("main").unwrap();
             if let Err(e) = window.set_ignore_cursor_events(true) {
-                eprintln!("[co-sheep] Failed to set click-through: {}", e);
+                log!("app", "error: Failed to set click-through: {}", e);
             } else {
-                eprintln!("[co-sheep] Click-through enabled on main window");
+                log!("app", "Click-through enabled on main window");
             }
 
             // Request screen capture permission early (just triggers the dialog)
             let preflight = permissions::has_screen_capture_permission();
-            eprintln!("[co-sheep] Screen capture preflight: {}", if preflight { "granted" } else { "not granted (will try actual capture later)" });
+            log!("app", "Screen capture preflight: {}", if preflight { "granted" } else { "not granted (will try actual capture later)" });
             if !preflight {
                 permissions::request_screen_capture_permission();
             }
 
             // Resize window to fill screen
             if let Ok(ref info) = screen_info::get_primary_screen_info() {
-                eprintln!("[co-sheep] Screen info: {}x{}", info.width, info.height);
+                log!("app", "Screen info: {}x{}", info.width, info.height);
                 window
                     .set_size(tauri::LogicalSize::new(
                         info.width as f64,
@@ -765,7 +765,7 @@ pub fn run() {
                 .menu(&tray_menu)
                 .menu_on_left_click(true)
                 .on_menu_event(move |app, event| {
-                    eprintln!("[co-sheep] Tray menu event: {}", event.id().as_ref());
+                    log!("tray", "Tray menu event: {}", event.id().as_ref());
                     match event.id().as_ref() {
                         "quit" => app.exit(0),
                         "pause" => {
@@ -775,9 +775,9 @@ pub fn run() {
                         "comment_now" => {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
-                                eprintln!("[co-sheep] Manual commentary triggered");
+                                log!("app", "Manual commentary triggered");
                                 if let Err(e) = vision::run_vision_pipeline(&handle).await {
-                                    eprintln!("[co-sheep] Manual commentary failed: {}", e);
+                                    log!("app", "error: Manual commentary failed: {}", e);
                                 }
                             });
                         }
@@ -785,7 +785,7 @@ pub fn run() {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = open_settings_window(handle).await {
-                                    eprintln!("[co-sheep] Failed to open settings: {}", e);
+                                    log!("app", "error: Failed to open settings: {}", e);
                                 }
                             });
                         }
@@ -793,7 +793,7 @@ pub fn run() {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = open_memory_window(handle).await {
-                                    eprintln!("[co-sheep] Failed to open memory: {}", e);
+                                    log!("app", "error: Failed to open memory: {}", e);
                                 }
                             });
                         }
@@ -801,7 +801,7 @@ pub fn run() {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = open_friends_window(handle).await {
-                                    eprintln!("[co-sheep] Failed to open friends: {}", e);
+                                    log!("app", "error: Failed to open friends: {}", e);
                                 }
                             });
                         }
@@ -815,7 +815,7 @@ pub fn run() {
                             let handle = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = open_wardrobe_window(handle).await {
-                                    eprintln!("[co-sheep] Failed to open wardrobe: {}", e);
+                                    log!("app", "error: Failed to open wardrobe: {}", e);
                                 }
                             });
                         }
@@ -921,7 +921,7 @@ pub fn run() {
             let app_menu = tauri::menu::Menu::with_items(app, &[&app_submenu])?;
             app.set_menu(app_menu)?;
             app.on_menu_event(move |app, event| {
-                eprintln!("[co-sheep] App menu event: {}", event.id().as_ref());
+                log!("tray", "App menu event: {}", event.id().as_ref());
                 match event.id().as_ref() {
                     "menu_quit" => app.exit(0),
                     "menu_pause" => {
@@ -931,9 +931,9 @@ pub fn run() {
                     "menu_comment_now" => {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            eprintln!("[co-sheep] Manual commentary triggered (menu)");
+                            log!("app", "Manual commentary triggered (menu)");
                             if let Err(e) = vision::run_vision_pipeline(&handle).await {
-                                eprintln!("[co-sheep] Manual commentary failed: {}", e);
+                                log!("app", "error: Manual commentary failed: {}", e);
                             }
                         });
                     }
@@ -941,7 +941,7 @@ pub fn run() {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = open_settings_window(handle).await {
-                                eprintln!("[co-sheep] Failed to open settings: {}", e);
+                                log!("app", "error: Failed to open settings: {}", e);
                             }
                         });
                     }
@@ -949,7 +949,7 @@ pub fn run() {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = open_memory_window(handle).await {
-                                eprintln!("[co-sheep] Failed to open memory: {}", e);
+                                log!("app", "error: Failed to open memory: {}", e);
                             }
                         });
                     }
@@ -957,7 +957,7 @@ pub fn run() {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = open_friends_window(handle).await {
-                                eprintln!("[co-sheep] Failed to open friends: {}", e);
+                                log!("app", "error: Failed to open friends: {}", e);
                             }
                         });
                     }
@@ -971,7 +971,7 @@ pub fn run() {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = open_wardrobe_window(handle).await {
-                                eprintln!("[co-sheep] Failed to open wardrobe: {}", e);
+                                log!("app", "error: Failed to open wardrobe: {}", e);
                             }
                         });
                     }
@@ -979,7 +979,7 @@ pub fn run() {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Err(e) = debug_capture(handle).await {
-                                eprintln!("[co-sheep] Debug capture failed: {}", e);
+                                log!("app", "error: Debug capture failed: {}", e);
                             }
                         });
                     }
@@ -1003,36 +1003,36 @@ pub fn run() {
                     _ => {}
                 }
             });
-            eprintln!("[co-sheep] System tray created");
+            log!("app", "System tray created");
 
             // Spawn cursor tracking loop (for drag-and-drop hit detection)
-            eprintln!("[co-sheep] Spawning cursor tracking loop");
+            log!("app", "Spawning cursor tracking loop");
             let cursor_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 cursor::cursor_tracking_loop(cursor_handle).await;
             });
 
             // Spawn vision loop
-            eprintln!("[co-sheep] Spawning vision loop");
+            log!("app", "Spawning vision loop");
             let vision_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 vision::vision_loop(vision_handle).await;
             });
 
             // Spawn memory reflection loop (daily consolidation + backfill)
-            eprintln!("[co-sheep] Spawning reflection loop");
+            log!("app", "Spawning reflection loop");
             tauri::async_runtime::spawn(async move {
                 reflect::reflection_loop().await;
             });
 
             // Spawn frontmost-app watcher (feeds gossip & live reactions)
-            eprintln!("[co-sheep] Spawning app watch loop");
+            log!("app", "Spawning app watch loop");
             let app_watch_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 app_watch::app_watch_loop(app_watch_handle).await;
             });
 
-            eprintln!("[co-sheep] Setup complete");
+            log!("app", "Setup complete");
             Ok(())
         })
         .run(tauri::generate_context!())

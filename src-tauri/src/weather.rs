@@ -63,7 +63,7 @@ async fn fetch_weather(location: &str) -> Result<WeatherInfo, Box<dyn std::error
         })
         .collect();
     let url = format!("https://wttr.in/{}?format=j1", encoded);
-    eprintln!("[co-sheep] Fetching weather from: {}", url);
+    log!("weather", "Fetching weather from: {}", url);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -125,7 +125,7 @@ pub async fn get_weather() -> Option<WeatherInfo> {
             Some(info)
         }
         Err(e) => {
-            eprintln!("[co-sheep] Weather fetch failed: {}", e);
+            log!("weather", "error: Weather fetch failed: {}", e);
             // Return stale cache on error
             let cache = CACHE.lock().unwrap();
             cache.info.clone()

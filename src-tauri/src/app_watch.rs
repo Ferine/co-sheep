@@ -130,7 +130,7 @@ pub async fn app_watch_loop(app: tauri::AppHandle) {
                 "previousDurationMs": if current.is_some() { previous_duration_ms } else { 0 },
             });
             app.emit("app-switched", payload).ok();
-            eprintln!("[co-sheep] App switched to: {}", front);
+            log!("watch", "App switched to: {}", front);
             current = Some(front);
             since = std::time::Instant::now();
         }
