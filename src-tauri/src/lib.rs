@@ -1,3 +1,5 @@
+#[macro_use]
+mod logging;
 mod app_watch;
 mod apple_ai;
 mod capture;
