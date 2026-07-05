@@ -592,6 +592,17 @@ fn set_dragging(
     }
 }
 
+/// Dev console forwarding — the webview's console.log/warn/error land here.
+#[tauri::command]
+fn frontend_log(level: String, message: String) {
+    let msg = logging::truncate_for_log(&message, 500);
+    match level.as_str() {
+        "warn" => log!("web", "warn: {}", msg),
+        "error" => log!("web", "error: {}", msg),
+        _ => log!("web", "{}", msg),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -607,6 +618,7 @@ pub fn run() {
             set_dragging,
             set_cursor_events,
             chat_with_sheep,
+            frontend_log,
             get_settings,
             save_settings,
             open_settings_window,
