@@ -911,6 +911,9 @@ export class Sheep {
       const landY = p.y - this.displaySize;
       // Only land on platforms that are above the ground
       if (landY >= this.groundY) continue;
+      // ...but low enough that the sheep stays fully on-screen — a
+      // maximized window's top edge sits at the menu bar
+      if (landY < 0) continue;
       if (this.y >= landY && this.y - 10 < landY + 20) {
         if (this.x + this.displaySize > p.x && this.x < p.x + p.w) {
           this.y = landY;
