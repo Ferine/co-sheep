@@ -68,6 +68,9 @@ Noise policy applied during migration:
   throw). Original console behavior preserved.
 - `window.onerror` and `unhandledrejection` handlers forward as `error`.
 - Packaged builds: wrapper not installed (DEV gate); command exists but idle.
+- Auxiliary windows (settings, memory, wardrobe, friend-memory) forward
+  `console.error` only, via a minimal inline wrapper — full log/warn
+  forwarding is scoped to the main overlay.
 
 ### 4. Verification
 

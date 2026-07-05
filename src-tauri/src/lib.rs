@@ -595,7 +595,10 @@ fn set_dragging(
 /// Dev console forwarding — the webview's console.log/warn/error land here.
 #[tauri::command]
 fn frontend_log(level: String, message: String) {
-    let msg = logging::truncate_for_log(&message, 500);
+    // Frontend call sites historically embed "[co-sheep] " / "[co-sheep:id] "
+    // in their messages; the [web] tag makes that redundant — strip one copy.
+    let message = logging::strip_legacy_prefix(&message);
+    let msg = logging::truncate_for_log(message, 500);
     match level.as_str() {
         "warn" => log!("web", "warn: {}", msg),
         "error" => log!("web", "error: {}", msg),

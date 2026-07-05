@@ -52,6 +52,17 @@ pub fn raw_for_log(s: &str) -> Cow<'_, str> {
     }
 }
 
+/// Strip one leading legacy "[co-sheep] " / "[co-sheep:id] " prefix — the
+/// [web] tag already carries that information.
+pub fn strip_legacy_prefix(message: &str) -> &str {
+    if let Some(rest) = message.strip_prefix("[co-sheep") {
+        if let Some((_, m)) = rest.split_once("] ") {
+            return m;
+        }
+    }
+    message
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +86,13 @@ mod tests {
     fn exact_fit_is_not_truncated() {
         let s = "abcd";
         assert_eq!(truncate_for_log(s, 4).as_ref(), "abcd");
+    }
+
+    #[test]
+    fn strips_plain_and_id_legacy_prefixes() {
+        assert_eq!(strip_legacy_prefix("[co-sheep] Canvas ready"), "Canvas ready");
+        assert_eq!(strip_legacy_prefix("[co-sheep:friend_123] bounce"), "bounce");
+        assert_eq!(strip_legacy_prefix("no prefix here"), "no prefix here");
+        assert_eq!(strip_legacy_prefix("[other] tag"), "[other] tag");
     }
 }
