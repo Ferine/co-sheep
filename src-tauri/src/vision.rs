@@ -22,22 +22,25 @@ pub(crate) struct CommentaryEvent {
 }
 
 pub async fn vision_loop(app: tauri::AppHandle) {
-    eprintln!("[co-sheep] Vision loop started, waiting 8s for UI...");
+    log!("vision", "loop started, waiting 8s for UI...");
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-    // --- Startup checks ---
-    eprintln!("[co-sheep] Running prerequisite checks...");
-    if !check_prerequisites(&app).await {
-        eprintln!("[co-sheep] Prerequisites not met, retrying every 30s...");
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            eprintln!("[co-sheep] Retrying prerequisite checks...");
-            if check_prerequisites(&app).await {
-                break;
+    let mut last_failure: Option<String> = None;
+    loop {
+        match check_prerequisites(&app).await {
+            Ok(()) => break,
+            Err(reason) => {
+                if last_failure.as_deref() != Some(reason.as_str()) {
+                    log!("vision", "prerequisites not met: {} (retrying every 30s)", reason);
+                    last_failure = Some(reason);
+                } else {
+                    debug!("vision", "retry: still {}", reason);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             }
         }
     }
-    eprintln!("[co-sheep] All prerequisites met, entering main vision loop");
+    log!("vision", "prerequisites met — entering main vision loop");
 
     // --- Main vision loop ---
     loop {
@@ -46,7 +49,7 @@ pub async fn vision_loop(app: tauri::AppHandle) {
                 Ok(()) => {}
                 Err(e) => {
                     let msg = e.to_string();
-                    eprintln!("[co-sheep] Vision pipeline error: {}", msg);
+                    log!("vision", "error: pipeline: {}", msg);
 
                     // Surface capture/permission errors to the user
                     if msg.contains("screen")
@@ -70,22 +73,22 @@ pub async fn vision_loop(app: tauri::AppHandle) {
             .unwrap_or_default()
             .subsec_nanos();
         let delay = base - jitter + (now as u64 % (jitter * 2 + 1));
-        eprintln!("[co-sheep] Next vision check in {}s (base: {}s)", delay, base);
+        debug!("vision", "next check in {}s (base: {}s)", delay, base);
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
     }
 }
 
 /// Checks the on-device model, screen permission, and does a test capture.
 /// Emits user-facing messages via speech bubble for each failure.
-/// Returns true if everything is ready.
-async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
+/// Returns Ok(()) if everything is ready, Err(reason) otherwise.
+async fn check_prerequisites(app: &tauri::AppHandle) -> Result<(), String> {
     // 1. Check the on-device Apple Intelligence model
     match apple_ai::check_available().await {
         Ok(()) => {
-            eprintln!("[co-sheep] Apple Intelligence is available");
+            debug!("vision", "Apple Intelligence is available");
         }
         Err(reason) => {
-            eprintln!("[co-sheep] Apple Intelligence unavailable: {}", reason);
+            debug!("vision", "Apple Intelligence unavailable: {}", reason);
             let msg = match reason.as_str() {
                 "appleIntelligenceNotEnabled" => {
                     "Apple Intelligence is turned off! Enable it in System Settings > Apple Intelligence & Siri, then I can think locally."
@@ -101,38 +104,38 @@ async fn check_prerequisites(app: &tauri::AppHandle) -> bool {
                 }
             };
             app.emit("sheep-commentary", msg).ok();
-            return false;
+            return Err(format!("apple intelligence: {}", reason));
         }
     }
 
     // 2. Check screen capture permission by actually trying a capture.
     if !permissions::has_screen_capture_permission() {
-        eprintln!("[co-sheep] CGPreflight says no permission — requesting dialog");
+        debug!("vision", "CGPreflight says no permission — requesting dialog");
         permissions::request_screen_capture_permission();
     }
 
     // 3. Test capture — the real permission check
     match tokio::task::spawn_blocking(|| capture::capture_screen()).await {
         Ok(Ok(_)) => {
-            eprintln!("[co-sheep] Test capture succeeded — vision pipeline ready");
+            debug!("vision", "Test capture succeeded — vision pipeline ready");
         }
         Ok(Err(e)) => {
             let msg = e.to_string();
-            eprintln!("[co-sheep] Test capture failed: {}", msg);
+            debug!("vision", "Test capture failed: {}", msg);
             app.emit(
                 "sheep-commentary",
                 "I can't capture your screen! Add me to System Settings > Privacy & Security > Screen Recording, then restart me.",
             )
             .ok();
-            return false;
+            return Err(format!("capture: {}", msg));
         }
         Err(e) => {
-            eprintln!("[co-sheep] Test capture task panicked: {}", e);
-            return false;
+            debug!("vision", "Test capture task panicked: {}", e);
+            return Err(format!("capture task panicked: {}", e));
         }
     }
 
-    true
+    Ok(())
 }
 
 pub async fn run_vision_pipeline(
@@ -147,34 +150,35 @@ pub async fn run_vision_pipeline(
     crate::VISION_TICK_RUNNING.store(true, Ordering::Relaxed);
     let _tick_guard = TickGuard;
 
-    eprintln!("[co-sheep] --- Vision pipeline tick ---");
+    log!("vision", "tick: capturing");
 
     // Log preflight status but don't block — actual capture is the real test
     if !permissions::has_screen_capture_permission() {
-        eprintln!("[co-sheep] Preflight says no permission, attempting capture anyway...");
+        debug!("vision", "Preflight says no permission, attempting capture anyway...");
     }
 
     // Capture screen (blocking operation)
-    eprintln!("[co-sheep] Capturing screen...");
     let screenshot_b64 =
         tokio::task::spawn_blocking(|| capture::capture_screen()).await??;
 
     // The on-device model is text-only — OCR the screenshot once and feed
     // the recognized text to both passes instead of the image
-    eprintln!("[co-sheep] OCR-ing screen for on-device model...");
+    debug!("vision", "OCR-ing screen...");
     let screen_text = apple_ai::ocr_screen(&screenshot_b64).await?;
-    eprintln!("[co-sheep] OCR extracted {} chars", screen_text.len());
+    debug!("vision", "OCR: {} chars", screen_text.len());
 
     // Pass 1: Classification
-    eprintln!("[co-sheep] Pass 1: Classifying screen...");
+    debug!("vision", "Pass 1: Classifying screen...");
     let classification = classify_screen(&screen_text).await?;
-    eprintln!(
-        "[co-sheep] Classification: interesting={}, summary={}",
-        classification.interesting, classification.summary
+    log!(
+        "vision",
+        "classified: {} ({})",
+        classification.summary,
+        if classification.interesting { "interesting" } else { "boring" }
     );
 
     if !classification.interesting {
-        eprintln!("[co-sheep] Not interesting, skipping commentary");
+        debug!("vision", "Not interesting, skipping commentary");
         memory::append_journal(&format!(
             "Glanced at screen. {}. Nothing worth commenting on.",
             classification.summary
@@ -184,7 +188,7 @@ pub async fn run_vision_pipeline(
     }
 
     // Pass 2: Commentary (only when interesting)
-    eprintln!("[co-sheep] Pass 2: Generating commentary...");
+    debug!("vision", "Pass 2: Generating commentary...");
     let recent_context = memory::get_recent_context(Some(&screen_text)).unwrap_or_default();
     let raw_response = generate_commentary(
         &screen_text,
@@ -192,14 +196,19 @@ pub async fn run_vision_pipeline(
         &recent_context,
     )
     .await?;
-    eprintln!("[co-sheep] Raw response: {}", raw_response);
+    log!("vision", "raw: {}", crate::logging::raw_for_log(&raw_response));
 
     // Parse structured response
     let parsed = parse_commentary_response(&raw_response);
-    eprintln!(
-        "[co-sheep] Parsed: text={}, animation={:?}, opinion={:?}, count={:?}",
-        parsed.event.text, parsed.event.animation, parsed.opinion_topic, parsed.count
+    log!(
+        "vision",
+        "💬 \"{}\" [{}]",
+        parsed.event.text,
+        parsed.event.animation.as_deref().unwrap_or("-")
     );
+    if let (Some(topic), Some(_)) = (&parsed.opinion_topic, &parsed.opinion) {
+        log!("vision", "opinion: [{}]", topic);
+    }
 
     // Save/update opinion if the sheep formed one
     if let (Some(ref topic), Some(ref opinion)) = (&parsed.opinion_topic, &parsed.opinion) {
@@ -213,7 +222,7 @@ pub async fn run_vision_pipeline(
     // Increment daily counter if the sheep is tracking something
     if let Some(ref key) = parsed.count {
         let n = memory::increment_today(key);
-        eprintln!("[co-sheep] Counter '{}' now at {} today", key, n);
+        log!("vision", "count: {} = {} today", key, n);
     }
 
     // Record that a comment was made
@@ -221,7 +230,7 @@ pub async fn run_vision_pipeline(
 
     // Emit structured commentary to frontend
     app.emit("sheep-commentary", &parsed.event)?;
-    eprintln!("[co-sheep] Commentary emitted to frontend");
+    debug!("vision", "Commentary emitted to frontend");
 
     // Log to daily journal
     memory::append_journal(&format!(
@@ -283,7 +292,7 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
     // Truncated mid-generation: salvage the text field so the bubble shows
     // the sheep's words, not a JSON fragment
     if let Some(text) = extract_text_field(trimmed) {
-        eprintln!("[co-sheep] Truncated JSON, salvaged text field");
+        log!("vision", "salvaged text from truncated JSON");
         return ParsedResponse {
             event: CommentaryEvent {
                 text,
@@ -296,7 +305,7 @@ fn parse_commentary_response(raw: &str) -> ParsedResponse {
         };
     }
 
-    eprintln!("[co-sheep] Failed to parse as JSON, using raw text");
+    log!("vision", "error: unparseable response, using raw text");
     ParsedResponse {
         event: CommentaryEvent {
             text: raw.trim().to_string(),
@@ -423,7 +432,7 @@ pub async fn chat_with_sheep(
     let raw_response =
         apple_ai::generate_chat(&system_prompt, user_message, &history_payload).await?;
 
-    eprintln!("[co-sheep] Chat raw response: {}", raw_response);
+    log!("vision", "chat raw: {}", crate::logging::raw_for_log(&raw_response));
     let parsed = parse_commentary_response(&raw_response);
 
     // Save opinion if formed
@@ -499,7 +508,7 @@ Let their history color the exchange subtly — a callback, a grudge, warmth. Do
 
     let raw = apple_ai::generate(&system_prompt, &user_msg).await?;
 
-    eprintln!("[co-sheep] Friend chat raw: {}", raw);
+    log!("vision", "friend chat raw: {}", crate::logging::raw_for_log(&raw));
     Ok(raw)
 }
 
