@@ -11,6 +11,7 @@ import { EasterStatsSnapshot } from "./easter-theme";
 import { bus } from "./events";
 import { DramaManager } from "./drama-manager";
 import { GossipManager } from "./gossip";
+import { McpCompanion } from "./mcp-companion";
 import "./styles.css";
 
 // Dev only: tee console + uncaught errors to the terminal via the backend.
@@ -103,6 +104,10 @@ async function init() {
 
   const gossipManager = new GossipManager(flock);
   gossipManager.start();
+
+  const mcpCompanion = new McpCompanion(flock);
+  mcpCompanion.start();
+  console.log("[co-sheep] MCP companion listening for sheep-session events");
 
   // Bridge the Rust app watcher onto the flock bus.
   listen<{ app: string; previousApp: string | null; previousDurationMs: number }>(

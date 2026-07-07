@@ -39,6 +39,15 @@ export interface CommentaryEvent {
   animation: SheepAnimation | null;
 }
 
+export interface SessionEvent {
+  kind: string;              // begin | task | progress | milestone | end
+  task: string | null;
+  progress: number | null;   // 0..1
+  milestone: string | null;  // done | failed | blocked | waiting_on_you
+  detail: string | null;
+  health: string;            // good | degraded | failing
+}
+
 export type FriendColor = "pink" | "blue" | "green" | "gold" | "purple" | "orange";
 
 export type FriendPersonality = "snarky" | "wholesome" | "chaotic" | "passive-aggressive";
