@@ -14,6 +14,11 @@ const POOLS = {
     "Hm. Watching you wrestle with this.",
     "Go on then. I'm observing.",
   ],
+  new_task_labeled: [
+    (label: string) => `Watching you wrestle with "${label}" again, hm?`,
+    (label: string) => `"${label}". Predictable choice.`,
+    (label: string) => `So it's "${label}" today. Riveting.`,
+  ],
   progress_mid: [
     "Halfway. Don't get comfortable.",
     "Still going. Barely.",
@@ -51,8 +56,12 @@ const POOLS = {
   ],
 } as const;
 
-function pick(pool: readonly string[], rng: () => number): string {
+function pick<T>(pool: readonly T[], rng: () => number): T {
   return pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
+}
+
+function withDetail(text: string, detail: string | null): string {
+  return detail ? `${text} (${detail})` : text;
 }
 
 export function pickReaction(
@@ -62,18 +71,23 @@ export function pickReaction(
   if (ev.kind === "milestone") {
     switch (ev.milestone) {
       case "failed":
-        return { text: pick(POOLS.failed, rng), animation: "headshake" };
+        return { text: withDetail(pick(POOLS.failed, rng), ev.detail), animation: "headshake" };
       case "done":
-        return { text: pick(POOLS.done, rng), animation: "bounce" };
+        return { text: withDetail(pick(POOLS.done, rng), ev.detail), animation: "bounce" };
       case "blocked":
-        return { text: pick(POOLS.blocked, rng), animation: "vibrate" };
+        return { text: withDetail(pick(POOLS.blocked, rng), ev.detail), animation: "vibrate" };
       case "waiting_on_you":
-        return { text: pick(POOLS.waiting, rng), animation: "vibrate" };
+        return { text: withDetail(pick(POOLS.waiting, rng), ev.detail), animation: "vibrate" };
     }
   }
   if (ev.kind === "begin") return { text: pick(POOLS.clock_in, rng), animation: "bounce" };
   if (ev.kind === "end") return { text: pick(POOLS.clock_out, rng), animation: null };
-  if (ev.kind === "task") return { text: pick(POOLS.new_task, rng), animation: null };
+  if (ev.kind === "task") {
+    if (ev.task) {
+      return { text: pick(POOLS.new_task_labeled, rng)(ev.task), animation: null };
+    }
+    return { text: pick(POOLS.new_task, rng), animation: null };
+  }
   if (ev.kind === "progress") {
     const p = ev.progress ?? 0;
     return { text: pick(p >= 0.9 ? POOLS.progress_high : POOLS.progress_mid, rng), animation: null };

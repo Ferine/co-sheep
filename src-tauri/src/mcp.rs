@@ -342,7 +342,7 @@ mod tests {
         let s = "æøå".repeat(400); // 1200 chars, 2 bytes each
         let t = truncate(&s, 500);
         assert!(t.chars().count() <= 500);
-        assert!(s.starts_with(&t) || t.len() < s.len());
+        assert!(s.starts_with(&t));
     }
 
     #[test]
