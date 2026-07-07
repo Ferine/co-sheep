@@ -7,6 +7,7 @@ mod cursor;
 mod easter_memory;
 mod friend_memory;
 mod living_state;
+mod mcp;
 mod memory;
 mod onboarding;
 mod permissions;
