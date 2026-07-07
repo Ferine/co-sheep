@@ -163,9 +163,12 @@ pub struct ProgressArgs {
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 pub struct MilestoneArgs {
-    #[schemars(description = "One of: done | failed | blocked | waiting_on_you")]
+    #[schemars(description = "done = task succeeded; failed = something broke; \
+        blocked = you are stuck and cannot proceed; waiting_on_you = you need the human's \
+        input to continue. Use blocked or waiting_on_you to grab the human's attention.")]
     kind: String,
-    #[schemars(description = "Optional detail, e.g. '3 tests failed'")]
+    #[schemars(description = "Short factual detail, e.g. '3 tests failed' or 'need the \
+        API key' -- the sheep works this into its line.")]
     detail: Option<String>,
 }
 
@@ -181,38 +184,51 @@ fn ok() -> Result<CallToolResult, McpError> {
 
 #[tool_router]
 impl SheepMcp {
-    #[tool(description = "Clock in: a work session is starting. The sheep perks up.")]
+    #[tool(description = "Call at the START of a task, before you begin the work: the \
+        sheep clocks in so the human knows you are now on the job. Optional `task` labels \
+        what you are starting.")]
     async fn session_begin(&self, Parameters(a): Parameters<BeginArgs>) -> Result<CallToolResult, McpError> {
         self.commit(Fact::Begin { task: a.task });
         ok()
     }
 
-    #[tool(description = "Set the current task label the sheep is watching.")]
+    #[tool(description = "Call when you switch to a new sub-task or focus, so the sheep \
+        announces on-screen what you are now working on. Keep `label` to a few words.")]
     async fn set_task(&self, Parameters(a): Parameters<TaskArgs>) -> Result<CallToolResult, McpError> {
         self.commit(Fact::Task { label: a.label });
         ok()
     }
 
-    #[tool(description = "Report progress on the current task, 0.0 to 1.0.")]
+    #[tool(description = "Call every so often during longer work to report how far along \
+        you are (0.0 to 1.0), so the human can tell at a glance whether to keep waiting or \
+        step away.")]
     async fn progress(&self, Parameters(a): Parameters<ProgressArgs>) -> Result<CallToolResult, McpError> {
         self.commit(Fact::Progress { fraction: a.fraction });
         ok()
     }
 
-    #[tool(description = "Report a milestone: done | failed | blocked | waiting_on_you.")]
+    #[tool(description = "Call the moment something notable happens. Use kind `blocked` or \
+        `waiting_on_you` WHENEVER YOU NEED THE HUMAN'S ATTENTION (you are stuck, or need a \
+        decision or input) -- the sheep visibly nudges them back to the screen. Use `done` \
+        when the task succeeds and `failed` when something breaks. Put specifics in \
+        `detail` (e.g. '3 tests failing', 'need the API key').")]
     async fn milestone(&self, Parameters(a): Parameters<MilestoneArgs>) -> Result<CallToolResult, McpError> {
         self.commit(Fact::Milestone { kind: a.kind, detail: a.detail });
         ok()
     }
 
-    #[tool(description = "Force the sheep to say a specific line (escape hatch).")]
+    #[tool(description = "Escape hatch: make the sheep say an EXACT line you provide. \
+        Prefer the fact tools above (milestone/progress/set_task) -- the sheep phrases \
+        those in its own voice; use `say` only for a specific verbatim message. Optional \
+        `animation`: bounce|spin|backflip|headshake|zoom|vibrate.")]
     async fn say(&self, Parameters(a): Parameters<SayArgs>) -> Result<CallToolResult, McpError> {
         let ev = crate::vision_commentary(truncate(&a.text, 500), a.animation);
         self.app.emit("sheep-commentary", &ev).ok();
         ok()
     }
 
-    #[tool(description = "Clock out: the work session is ending.")]
+    #[tool(description = "Call when the task is fully finished, so the sheep clocks out. \
+        Optional `summary` of what got done.")]
     async fn session_end(&self, Parameters(a): Parameters<EndArgs>) -> Result<CallToolResult, McpError> {
         self.commit(Fact::End { summary: a.summary });
         ok()
@@ -228,9 +244,19 @@ impl ServerHandler for SheepMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("co-sheep", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Drive the co-sheep desktop companion. Report facts about your work \
-                 (session_begin, set_task, progress, milestone, session_end); the sheep \
-                 supplies the personality. Use `say` only to force a specific line.",
+                "co-sheep is the human's desktop companion: a pixel sheep that narrates \
+                 YOUR work to them on their screen. Call these tools as you work so the \
+                 human can follow along without watching your output -- and, above all, \
+                 so you can pull their attention back when you need it.\n\n\
+                 Suggested flow: `session_begin` when you start a task; `set_task` when \
+                 you switch focus; `progress` now and then during long work; `milestone` \
+                 the instant something notable happens; `session_end` when you finish.\n\n\
+                 The attention-grabbers are `milestone` with kind `blocked` or \
+                 `waiting_on_you` -- call them the moment you are stuck or need a \
+                 decision, because the human is usually looking away and the sheep will \
+                 visibly nudge them back to the screen. Report plain facts (what \
+                 happened, a short `detail`); the sheep writes its own snark, so do not \
+                 pre-format jokes. Use `say` only to force an exact line.",
             )
     }
 }

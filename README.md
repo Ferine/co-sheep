@@ -89,6 +89,22 @@ Config lives in `~/.co-sheep/config.json`: `mcp_enabled` (default `true`),
 `mcp_port` (default `4917`), `mcp_token` (optional bearer token; add
 `--header "Authorization: Bearer <token>"` to the connect command if set).
 
+### Getting Claude to actually narrate
+
+The tools carry strong "when to call me" hints in their descriptions and the
+server instructions — enough for Claude Code to pick the right one once it
+decides to report. But whether it narrates *unprompted* is up to the agent, so
+the reliable trigger is a line in your project's `CLAUDE.md`:
+
+```markdown
+When the co-sheep MCP server is connected, narrate your work through it:
+`session_begin` when you start, `progress`/`set_task` as you go, and a
+`milestone` when you finish, fail, or — especially — when you're `blocked` or
+`waiting_on_you` and need me back at the screen.
+```
+
+That turns the sheep from "available" into "actually keeps you company."
+
 ## Ambient Effects
 
 ![Night mode](docs/night-mode.png)
