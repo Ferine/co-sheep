@@ -50,6 +50,12 @@ pub struct SheepConfig {
     pub weather_location: String,
     #[serde(default)]
     pub accessories: Vec<String>,
+    #[serde(default = "default_mcp_enabled")]
+    pub mcp_enabled: bool,
+    #[serde(default = "default_mcp_port")]
+    pub mcp_port: u16,
+    #[serde(default)]
+    pub mcp_token: String,
 }
 
 fn default_language() -> String {
@@ -68,6 +74,14 @@ fn default_summer_mode() -> String {
     "auto".to_string()
 }
 
+fn default_mcp_enabled() -> bool {
+    true
+}
+
+fn default_mcp_port() -> u16 {
+    4917
+}
+
 impl Default for SheepConfig {
     fn default() -> Self {
         Self {
@@ -81,6 +95,9 @@ impl Default for SheepConfig {
             summer_mode: "auto".to_string(),
             weather_location: String::new(),
             accessories: Vec::new(),
+            mcp_enabled: true,
+            mcp_port: 4917,
+            mcp_token: String::new(),
         }
     }
 }
@@ -179,4 +196,25 @@ pub fn get_easter_mode() -> String {
     load_config()
         .map(|c| c.easter_mode)
         .unwrap_or_else(default_easter_mode)
+}
+
+#[cfg(test)]
+mod mcp_config_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_enable_mcp_on_4917() {
+        let c = SheepConfig::default();
+        assert!(c.mcp_enabled);
+        assert_eq!(c.mcp_port, 4917);
+        assert_eq!(c.mcp_token, "");
+    }
+
+    #[test]
+    fn config_missing_mcp_fields_deserializes_with_defaults() {
+        let json = r#"{"name":"S","personality":"snarky","interval_secs":150}"#;
+        let c: SheepConfig = serde_json::from_str(json).unwrap();
+        assert!(c.mcp_enabled);
+        assert_eq!(c.mcp_port, 4917);
+    }
 }
