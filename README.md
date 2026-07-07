@@ -58,6 +58,37 @@ The "Friend Relationships" viewer shows an affinity matrix, per-friend stats, an
 - **Right-click** main sheep to chat directly
 - **Capture Moment** — save sheep + speech bubble as PNG to Desktop (tray menu)
 
+## MCP: Claude Code narrates through the sheep
+
+co-sheep runs a local MCP server (`127.0.0.1:4917`) while the app is open. Point
+Claude Code at it and your progress reports come out of the sheep's mouth — in
+the sheep's voice, not Claude's.
+
+Connect once:
+
+```bash
+claude mcp add --transport http co-sheep http://127.0.0.1:4917/mcp
+```
+
+Or add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "co-sheep": { "type": "http", "url": "http://127.0.0.1:4917/mcp" }
+  }
+}
+```
+
+Tools: `session_begin`, `set_task`, `progress`, `milestone` (`done`/`failed`/
+`blocked`/`waiting_on_you`), `say`, `session_end`. You report facts; the sheep
+supplies the snark, animations, and mood. Tools only affect what the sheep
+displays — no filesystem or shell access.
+
+Config lives in `~/.co-sheep/config.json`: `mcp_enabled` (default `true`),
+`mcp_port` (default `4917`), `mcp_token` (optional bearer token; add
+`--header "Authorization: Bearer <token>"` to the connect command if set).
+
 ## Ambient Effects
 
 ![Night mode](docs/night-mode.png)

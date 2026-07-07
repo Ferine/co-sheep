@@ -7,6 +7,7 @@ mod cursor;
 mod easter_memory;
 mod friend_memory;
 mod living_state;
+mod mcp;
 mod memory;
 mod onboarding;
 mod permissions;
@@ -22,6 +23,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 
 pub static COMMENTARY_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Build a `sheep-commentary` payload the speech bubble already renders.
+pub(crate) fn vision_commentary(text: String, animation: Option<String>) -> serde_json::Value {
+    serde_json::json!({ "text": text, "animation": animation })
+}
 
 /// True while a vision-pipeline tick is running — reflection/backfill yield.
 pub static VISION_TICK_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -610,6 +616,7 @@ fn frontend_log(level: String, message: String) {
 pub fn run() {
     tauri::Builder::default()
         .manage(cursor::SheepHitState::new())
+        .manage(mcp::SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             check_onboarding,
             save_sheep_name,
@@ -1046,6 +1053,21 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 app_watch::app_watch_loop(app_watch_handle).await;
             });
+
+            // MCP companion server — Claude Code drives the sheep over loopback.
+            let cfg = onboarding::load_config().unwrap_or_default();
+            if cfg.mcp_enabled {
+                let mcp_app = app.handle().clone();
+                let port = cfg.mcp_port;
+                let token = cfg.mcp_token.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = mcp::serve(mcp_app, port, token).await {
+                        log!("mcp", "error: server disabled: {}", e);
+                    }
+                });
+            } else {
+                log!("mcp", "disabled via config");
+            }
 
             log!("app", "Setup complete");
             Ok(())
