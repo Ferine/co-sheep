@@ -8,7 +8,7 @@ protocol OverlayDriver: AnyObject {
     /// Mouse input, in canvas coordinates (top-left origin, y down).
     func mouseDown(x: Double, y: Double, clickCount: Int)
     func mouseDragged(x: Double, y: Double)
-    func mouseUp(x: Double, y: Double)
+    func mouseUp(x: Double, y: Double, clickCount: Int)
     func mouseMoved(x: Double, y: Double)
     func rightMouseDown(x: Double, y: Double)
 }
@@ -16,7 +16,7 @@ protocol OverlayDriver: AnyObject {
 extension OverlayDriver {
     func mouseDown(x: Double, y: Double, clickCount: Int) {}
     func mouseDragged(x: Double, y: Double) {}
-    func mouseUp(x: Double, y: Double) {}
+    func mouseUp(x: Double, y: Double, clickCount: Int) {}
     func mouseMoved(x: Double, y: Double) {}
     func rightMouseDown(x: Double, y: Double) {}
 }
@@ -89,7 +89,7 @@ final class OverlayScene: SKScene {
 
     override func mouseUp(with event: NSEvent) {
         let p = point(event)
-        driver?.mouseUp(x: p.x, y: p.y)
+        driver?.mouseUp(x: p.x, y: p.y, clickCount: event.clickCount)
     }
 
     override func mouseMoved(with event: NSEvent) {
