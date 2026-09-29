@@ -1,0 +1,3 @@
+import CoSheepKit
+
+CoSheepApp.run()
