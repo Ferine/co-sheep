@@ -94,3 +94,11 @@ nonisolated let FRIEND_TINTS: [FriendColor: String] = [
     .purple: "hsla(270, 60%, 65%, 0.35)",
     .orange: "hsla(25, 90%, 60%, 0.35)",
 ]
+
+/// The slice of `EasterTheme` a `Sheep` needs (sheep.ts: `easterTheme?.active`,
+/// `registerPaintedEgg`). Declared here so Sheep and EasterTheme compile
+/// independently; `EasterTheme` conforms.
+protocol EasterThemeHooks: AnyObject {
+    var active: Bool { get }
+    func registerPaintedEgg(_ sheepId: String, _ sheepName: String)
+}
