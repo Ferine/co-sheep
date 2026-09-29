@@ -5,8 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayHost?
     private var controller: AppController?
     private var menus: Menus?
-    private var demo: DemoDriver?
-    private var clickThroughTimer: TimerToken?
+    private var overlayController: OverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("app", "=== co-sheep starting ===")
@@ -36,16 +35,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menus.install()
         self.menus = menus
 
-        // TEMPORARY until the Flock lands: demo driver on the overlay.
-        let demo = DemoDriver(screen: host.screenSize)
-        host.scene.driver = demo
-        self.demo = demo
-        clickThroughTimer = SimTimers.every(50) { [weak self] in
-            guard let self, let overlay = self.overlay, let demo = self.demo else { return }
-            overlay.updateClickThrough(bounds: demo.bounds, forceInteractive: false)
-        }
-        if let path = ProcessInfo.processInfo.environment["CO_SHEEP_SNAPSHOT"] {
-            SimTimers.after(2500) { host.snapshotPNG(to: URL(fileURLWithPath: path)) }
+        let overlayController = OverlayController(host: host, app: controller)
+        overlayController.start()
+        self.overlayController = overlayController
+
+        // Dev aid: CO_SHEEP_SNAPSHOT=/path.png [CO_SHEEP_SNAPSHOT_DELAY_MS=…]
+        let env = ProcessInfo.processInfo.environment
+        if let path = env["CO_SHEEP_SNAPSHOT"] {
+            let delay = env["CO_SHEEP_SNAPSHOT_DELAY_MS"].flatMap(Double.init) ?? 2500
+            SimTimers.after(delay) { host.snapshotPNG(to: URL(fileURLWithPath: path)) }
         }
 
         controller.start()
