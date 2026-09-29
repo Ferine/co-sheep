@@ -448,6 +448,7 @@ final class OverlayController: OverlayDriver {
                 self.flock.main.stopListening()
                 bubble.destroy()
                 if self.chatBubble === bubble { self.chatBubble = nil }
+                bubbleRef = nil // break config-closure → bubble cycle
             },
             // A mousedown on a sheep is a grab, not a dismissal — dragging the
             // sheep mid-conversation must not wipe the transcript

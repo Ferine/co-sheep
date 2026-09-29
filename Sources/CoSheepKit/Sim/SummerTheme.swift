@@ -29,7 +29,7 @@ private let SUMMER_ACTIVE_REFRESH_INTERVAL_MS: Double = 60000
 /// June through August (northern hemisphere).
 /// `now` defaults to `SimClock` (tests can pass a date instead of overriding the clock).
 func isSummerSeason(_ now: Date = Date(timeIntervalSince1970: SimClock.nowMs() / 1000)) -> Bool {
-    let month = Calendar.current.component(.month, from: now) - 1 // 0-based, like getMonth()
+    let month = gregorian.component(.month, from: now) - 1 // 0-based, like getMonth()
     return month >= 5 && month <= 7
 }
 

@@ -46,8 +46,10 @@ final class OverlayHost {
     private var interactive = false
 
     init() {
-        let screen = NSScreen.screens.first ?? NSScreen.main!
-        screenFrame = screen.frame
+        // No display (e.g. headless login): start at a nominal size; `refit()`
+        // adopts the real screen once one appears.
+        let screen = NSScreen.screens.first ?? NSScreen.main
+        screenFrame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
         panel = OverlayPanel(frame: screenFrame)
         view = OverlaySKView(frame: NSRect(origin: .zero, size: screenFrame.size))
         view.allowsTransparency = true
@@ -56,12 +58,12 @@ final class OverlayHost {
         view.preferredFramesPerSecond = ProcessInfo.processInfo.environment["CO_SHEEP_FPS"].flatMap(Int.init) ?? 60
         view.shouldCullNonVisibleNodes = true
         scene = OverlayScene(size: screenFrame.size)
-        scene.backingScale = screen.backingScaleFactor
+        scene.backingScale = Double(screen?.backingScaleFactor ?? 2)
         view.presentScene(scene)
         panel.contentView = view
         panel.setFrame(screenFrame, display: true)
         panel.orderFrontRegardless()
-        Log.info("app", "Overlay \(Int(screenFrame.width))x\(Int(screenFrame.height)) @\(screen.backingScaleFactor)x")
+        Log.info("app", "Overlay \(Int(screenFrame.width))x\(Int(screenFrame.height)) @\(scene.backingScale)x")
     }
 
     var screenSize: ScreenSize {

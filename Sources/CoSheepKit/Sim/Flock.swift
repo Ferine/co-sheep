@@ -788,8 +788,15 @@ final class Flock {
 
     /// ex-`invoke("record_spectacle", …)` (lib.rs): friend memories + affinity
     /// boost + diary entry.
+    /// Ids that still exist. A friend removed mid-conversation/activity/
+    /// spectacle must not be written back — that would recreate its brain file.
+    private func stillPresent(_ ids: [String]) -> [String] {
+        ids.filter { $0 == "main" || friends[$0] != nil }
+    }
+
     private func recordSpectacle(kind: String, participants: [String]) {
-        if participants.isEmpty { return }
+        let participants = stillPresent(participants)
+        guard !participants.isEmpty else { return }
         FriendMemory.recordGroupActivity(participants, kind)
         try? Memory.appendJournal("*A \(kind) happened on the desktop! The flock is still talking about it.*")
     }
@@ -1055,7 +1062,8 @@ final class Flock {
         }
 
         if !cancelledEarly {
-            FriendMemory.recordGroupActivity(activity.participants, activity.type.rawValue)
+            let present = stillPresent(activity.participants)
+            if !present.isEmpty { FriendMemory.recordGroupActivity(present, activity.type.rawValue) }
             bus.emit(.groupActivity(type: activity.type.rawValue, participants: activity.participants))
         }
 
@@ -1087,7 +1095,9 @@ final class Flock {
                     let pIds = conv.participants
                     let topic = conv.lines.first.map { Self.prefix30($0.text) } ?? "something"
                     if pIds.count == 2 {
-                        FriendMemory.recordConversation(pIds[0], pIds[1], topic)
+                        if stillPresent([pIds[0], pIds[1]]).count == 2 {
+                            FriendMemory.recordConversation(pIds[0], pIds[1], topic)
+                        }
                         bus.emit(.conversationHappened(idA: pIds[0], idB: pIds[1], topic: topic))
                     }
                     activeConversation = nil

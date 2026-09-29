@@ -62,7 +62,7 @@ final class FriendsModel: WindowModel {
 
     func reload() {
         friends = WindowCommands.getFriends()
-        drafts = Dictionary(uniqueKeysWithValues: friends.map { ($0.id, $0.accessories) })
+        drafts = Dictionary(friends.map { ($0.id, $0.accessories) }, uniquingKeysWith: { first, _ in first })
         openPanels.formIntersection(friends.map(\.id))
     }
 

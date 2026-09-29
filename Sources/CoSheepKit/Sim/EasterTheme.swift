@@ -127,13 +127,21 @@ func computeEasterSunday(_ year: Int) -> Date {
     let m = (a + 11 * h + 22 * l) / 451
     let month = (h + l - 7 * m + 114) / 31
     let day = ((h + l - 7 * m + 114) % 31) + 1
-    return Calendar.current.date(from: DateComponents(year: year, month: month, day: day))!
+    return gregorian.date(from: DateComponents(year: year, month: month, day: day))!
 }
+
+/// JS `Date` is always Gregorian in the local zone — never the user's
+/// system calendar (Buddhist, Japanese…), which would shift years/months.
+nonisolated let gregorian: Calendar = {
+    var c = Calendar(identifier: .gregorian)
+    c.timeZone = .current
+    return c
+}()
 
 /// Check if today falls within the Easter season window (5 days before to 2 days after).
 /// `now` defaults to `SimClock` (tests can pass a date instead of overriding the clock).
 func isEasterSeason(_ now: Date = Date(timeIntervalSince1970: SimClock.nowMs() / 1000)) -> Bool {
-    let cal = Calendar.current
+    let cal = gregorian
     let easter = computeEasterSunday(cal.component(.year, from: now))
     let start = cal.date(byAdding: .day, value: -5, to: easter)!
     let end = cal.date(byAdding: .day, value: 2, to: easter)!

@@ -87,8 +87,9 @@ extension BrainTests {
 
                 #expect(rig.sleeps.calls == [8, 30, 30, 120])
                 let downloading = "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."
-                // Rust emitted the line on every failed check, then the first real comment
-                #expect(rig.commentary.texts == [downloading, downloading, "Baaa."])
+                // Announced once per failure reason (Rust repeated it every 30s),
+                // then the first real comment
+                #expect(rig.commentary.texts == [downloading, "Baaa."])
                 #expect(rig.screen.captureCount == 2)
             }
         }

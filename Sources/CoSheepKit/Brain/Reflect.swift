@@ -286,8 +286,8 @@ If nothing needs tidying: {"ops": []}
     /// abandoned (cancelled, not awaited) — a model call that ignores
     /// cancellation cannot hold the caller past the deadline. Cancelling the
     /// caller cancels both and throws `CancellationError`.
-    private static func withTimeout<T: Sendable>(
-        seconds: Double, onTimeout: ReflectError,
+    static func withTimeout<T: Sendable>(
+        seconds: Double, onTimeout: any Error,
         _ op: @escaping @MainActor () async throws -> T
     ) async throws -> T {
         let box = TimeoutBox<T>()

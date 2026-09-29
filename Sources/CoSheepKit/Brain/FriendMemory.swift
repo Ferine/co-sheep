@@ -287,7 +287,8 @@ enum FriendMemory {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: Paths.friends.path) else {
             return
         }
-        for name in names {
+        // Only brain files — a stray .DS_Store or backup must not become a ghost friend.
+        for name in names where name.hasSuffix(".json") {
             let otherId = rustFileStem(name)
             if otherId == id { continue }
             var brain = loadBrain(otherId)

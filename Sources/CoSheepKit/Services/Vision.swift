@@ -85,7 +85,12 @@ final class VisionPipeline {
 
     /// ex-`VISION_TICK_RUNNING`: true while a pipeline run is in flight.
     /// Reflection and backfill yield to it.
-    private(set) var isTickRunning = false
+    /// ex-VISION_TICK_RUNNING. A counter, not a Bool: a "Comment Now" run
+    /// overlapping a loop tick must not clear the flag while the other runs.
+    private var activeTicks = 0
+    var isTickRunning: Bool { activeTicks > 0 }
+    /// Last prerequisite failure announced in a bubble (announce on change only).
+    private var lastAnnouncedFailure: String?
 
     /// - Parameters:
     ///   - model: `AppleAI` in production; a fake in tests.
@@ -201,7 +206,7 @@ final class VisionPipeline {
             default:
                 "I can't reach the on-device Apple Intelligence model. Check System Settings > Apple Intelligence & Siri."
             }
-            events.sheepCommentary.emit(CommentaryEvent(text: msg, animation: nil))
+            announceFailure("apple intelligence: \(reason)", msg)
             return "apple intelligence: \(reason)"
         }
         Log.debug("vision", "Apple Intelligence is available")
@@ -219,13 +224,36 @@ final class VisionPipeline {
         } catch {
             let msg = Self.describe(error)
             Log.debug("vision", "Test capture failed: \(msg)")
-            events.sheepCommentary.emit(CommentaryEvent(
-                text: "I can't capture your screen! Add me to System Settings > Privacy & Security > Screen Recording, then restart me.",
-                animation: nil))
+            announceFailure("capture",
+                "I can't capture your screen! Add me to System Settings > Privacy & Security > Screen Recording, then restart me.")
             return "capture: \(msg)"
         }
 
+        lastAnnouncedFailure = nil
         return nil
+    }
+
+    /// The Rust loop re-emitted the bubble on every 30s retry, forever (e.g.
+    /// on a Mac that can't run Apple Intelligence). Say it once per reason.
+    private func announceFailure(_ reason: String, _ text: String) {
+        guard lastAnnouncedFailure != reason else { return }
+        lastAnnouncedFailure = reason
+        events.sheepCommentary.emit(CommentaryEvent(text: text, animation: nil))
+    }
+
+    /// Model calls in the pipeline and friend chat get the same deadline as
+    /// reflection: a hung call must not stall the loop, pin the tick flag
+    /// (blocking reflection) or leave the flock's AI-chat flag set.
+    static let MODEL_TIMEOUT_SECS = 120.0
+
+    private func generateWithTimeout(_ what: String, system: String, prompt: String) async throws -> String {
+        let model = self.model
+        return try await Reflect.withTimeout(
+            seconds: Self.MODEL_TIMEOUT_SECS,
+            onTimeout: LanguageModelError("\(what) timed out after \(Int(Self.MODEL_TIMEOUT_SECS))s")
+        ) {
+            try await model.generate(system: system, prompt: prompt)
+        }
     }
 
     // MARK: - Pipeline (ex-`run_vision_pipeline`)
@@ -233,8 +261,8 @@ final class VisionPipeline {
     /// One tick: capture, OCR, classify and, when interesting, comment. Sets
     /// the tick flag for the whole run, including when it throws.
     func runVisionPipeline() async throws {
-        isTickRunning = true
-        defer { isTickRunning = false }
+        activeTicks += 1
+        defer { activeTicks -= 1 }
 
         Log.info("vision", "tick: capturing")
 
@@ -317,7 +345,7 @@ final class VisionPipeline {
     func classifyScreen(_ screenText: String) async throws -> ScreenClassification {
         let screenText = truncateUTF8(screenText, maxBytes: Self.OCR_BUDGET)
         let prompt = "Screen text:\n\(screenText)\n\n\(Self.CLASSIFY_PROMPT)"
-        let raw = try await model.generate(system: Self.CLASSIFY_SYSTEM, prompt: prompt)
+        let raw = try await generateWithTimeout("classify", system: Self.CLASSIFY_SYSTEM, prompt: prompt)
         return try Self.parseClassification(raw)
     }
 
@@ -326,7 +354,7 @@ final class VisionPipeline {
         let systemPrompt = Personality.getSystemPrompt(recentJournal: recentJournal, weatherContext: weatherCtx)
         let screenText = truncateUTF8(screenText, maxBytes: Self.OCR_BUDGET)
         let prompt = "Context: \(context)\n\nText visible on the screen (OCR):\n\(screenText)\n\n\(Self.COMMENTARY_PROMPT)"
-        return try await model.generate(system: systemPrompt, prompt: prompt)
+        return try await generateWithTimeout("commentary", system: systemPrompt, prompt: prompt)
     }
 
     // MARK: - Chat (text-only, for conversation mode)
@@ -400,7 +428,7 @@ final class VisionPipeline {
             "Generate a conversation between \(friendAName) and \(friendBName)."
         }
 
-        let raw = try await model.generate(system: systemPrompt, prompt: userMsg)
+        let raw = try await generateWithTimeout("friend chat", system: systemPrompt, prompt: userMsg)
 
         Log.info("vision", "friend chat raw: \(Log.rawForLog(raw))")
         return raw
