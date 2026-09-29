@@ -192,6 +192,19 @@ struct MCPServerTests {
 
     // MARK: HTTP policy end to end
 
+    /// A second instance (e.g. the old app still running) must not silently
+    /// share the port — its start fails and the app logs "server disabled".
+    @Test func aSecondServerCannotBindTheSamePort() async throws {
+        let events = AppEvents()
+        let a = MCPServer(store: SessionStore(events: events), events: events)
+        let b = MCPServer(store: SessionStore(events: events), events: events)
+        let port = try await a.start(port: 0, token: "")
+        defer { a.stop(); b.stop() }
+        await #expect(throws: (any Error).self) {
+            _ = try await b.start(port: port, token: "")
+        }
+    }
+
     @Test func bearerTokenIsEnforced() async throws {
         let (server, events) = makeServer()
         var seen = 0

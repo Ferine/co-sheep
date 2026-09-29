@@ -3,8 +3,9 @@ import Foundation
 // Ex-mcp.rs, the protocol half: the co-sheep MCP companion server. Fact-shaped
 // tools drive the sheep. Streamable HTTP in JSON-response mode: every POST is
 // answered with `application/json` (the spec allows this instead of an SSE
-// stream), there are no sessions, and GET has nothing to stream (405). That is
-// what rmcp's `stateful_mode: false, json_response: true` does.
+// stream), there are no sessions, and GET has nothing to stream (405). This is
+// a deliberate simplification: the Rust server used rmcp's defaults (stateful,
+// SSE); JSON mode is all a facts-in tool server needs and clients accept it.
 
 /// What a `tools/call` resolved to. Applied on the main actor.
 nonisolated enum MCPAction: Equatable {
