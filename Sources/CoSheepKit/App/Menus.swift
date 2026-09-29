@@ -5,6 +5,9 @@ struct MenuActions {
     var settings: () -> Void
     var memory: () -> Void
     var friends: () -> Void
+    /// Not reachable in the Tauri app (command registered, never invoked) although
+    /// the README documents it — exposed here.
+    var friendRelationships: () -> Void
     var wardrobe: () -> Void
     var chat: () -> Void
     var captureMoment: () -> Void
@@ -76,6 +79,7 @@ final class Menus: NSObject {
         m.addItem(item("Settings...", #selector(settings)))
         m.addItem(item("Sheep's Brain...", #selector(memory)))
         m.addItem(item("Manage Friends...", #selector(friends)))
+        m.addItem(item("Friend Relationships...", #selector(friendRelationships)))
         m.addItem(item("Wardrobe...", #selector(wardrobe)))
         m.addItem(item("Chat with Sheep...", #selector(chat)))
         m.addItem(item("Capture Moment", #selector(captureMoment)))
@@ -96,6 +100,7 @@ final class Menus: NSObject {
         app.addItem(item("Settings...", #selector(settings), key: ","))
         app.addItem(item("Sheep's Brain...", #selector(memory)))
         app.addItem(item("Manage Friends...", #selector(friends)))
+        app.addItem(item("Friend Relationships...", #selector(friendRelationships)))
         app.addItem(item("Wardrobe...", #selector(wardrobe)))
         app.addItem(item("Chat with Sheep...", #selector(chat)))
         app.addItem(item("Capture Moment", #selector(captureMoment)))
@@ -136,6 +141,7 @@ final class Menus: NSObject {
     @objc private func settings() { log("settings"); actions.settings() }
     @objc private func memory() { log("memory"); actions.memory() }
     @objc private func friends() { log("friends"); actions.friends() }
+    @objc private func friendRelationships() { log("friend_relationships"); actions.friendRelationships() }
     @objc private func wardrobe() { log("wardrobe"); actions.wardrobe() }
     @objc private func chat() { log("chat"); actions.chat() }
     @objc private func captureMoment() { log("capture_moment"); actions.captureMoment() }
