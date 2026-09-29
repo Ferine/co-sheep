@@ -48,6 +48,6 @@ final class AppEvents {
     let friendAccessoriesChanged = Signal<(id: String, accessories: [String])>()
     /// ex-"naming-complete": the new sheep name
     let namingComplete = Signal<String>()
-    /// Settings saved (personality, modes, break reminders…) — the overlay re-reads config.
-    let settingsChanged = Signal<Void>()
+    /// ex-"settings-changed": the saved config (personality, modes, break reminders…).
+    let settingsChanged = Signal<SheepConfig>()
 }
