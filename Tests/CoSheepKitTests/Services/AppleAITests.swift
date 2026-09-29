@@ -124,11 +124,11 @@ struct AppleAITests {
     // is cancelled (skipped) instead of holding the whole suite up.
     @Test func ocrReadsRenderedTextAndNothingFromABlankImage() async throws {
         let ai = AppleAI()
-        let outcome = await withTimeout(.seconds(10)) { try await ai.ocr(renderText("HELLO SHEEP 42")) }
+        let outcome = await withTimeout(.seconds(60)) { try await ai.ocr(renderText("HELLO SHEEP 42")) }
         let text: String
         switch outcome {
         case nil:
-            try Test.cancel("Vision text recognition did not answer within 10 s (no ML runtime here?)")
+            try Test.cancel("Vision text recognition did not answer within 60 s (no ML runtime here?)")
         case .failure(let error)?:
             // Same wrapper the helper's `fail("ocr: \u{2026}")` had.
             #expect((error as? CoSheepKit.LanguageModelError)?.description.hasPrefix("ocr: ") == true)

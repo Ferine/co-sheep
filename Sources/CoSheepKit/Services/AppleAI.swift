@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import FoundationModels
+import Synchronization
 import Vision
 
 // Ex-apple_ai.rs + helper/apple-ai-helper.swift. The sidecar (one process per
@@ -93,14 +94,32 @@ final class AppleAI: LanguageModel {
     /// small text, so switching APIs could change what gets recognized.
     @concurrent
     static func recognizeText(in image: CGImage) async throws -> String {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        // Some macOS 27 builds fail the accurate recognizer outright
+        // (`e5rtError … 13` building its compute op, even CPU-only) while the
+        // fast recognizer works. Fall back once and remember it for the
+        // process lifetime: the failing probe can take ~15 s the first time.
+        if !accurateUnavailable.withLock({ $0 }) {
+            do {
+                return try perform(image, level: .accurate)
+            } catch {
+                accurateUnavailable.withLock { $0 = true }
+                Log.info("vision", "error: accurate OCR failed (\(error)); falling back to fast recognition")
+            }
+        }
         do {
-            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            return try perform(image, level: .fast)
         } catch {
             throw LanguageModelError("ocr: \(error)")
         }
+    }
+
+    nonisolated private static let accurateUnavailable = Mutex(false)
+
+    nonisolated private static func perform(_ image: CGImage, level: VNRequestTextRecognitionLevel) throws -> String {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = level
+        request.usesLanguageCorrection = true
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
