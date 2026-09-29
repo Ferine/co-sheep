@@ -8,13 +8,13 @@ import Foundation
 enum CGReplay {
     static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    /// A premultiplied BGRA bitmap context (identity CTM, pixel space) with
-    /// tightly packed rows, so its buffer can be copied into a texture as-is.
+    /// A premultiplied RGBA bitmap context (identity CTM, pixel space) —
+    /// the layout SpriteKit textures use natively.
     static func makeBitmap(pixelWidth w: Int, pixelHeight h: Int) -> CGContext? {
         CGContext(
             data: nil, width: max(1, w), height: max(1, h), bitsPerComponent: 8, bytesPerRow: max(1, w) * 4,
             space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         )
     }
 

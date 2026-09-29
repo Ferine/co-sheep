@@ -1,21 +1,20 @@
 import CoreGraphics
-import CoreVideo
 import SpriteKit
 
 /// Turns each frame's `CanvasGroup`s into textured `SKSpriteNode`s: bbox →
 /// CoreGraphics raster at backing scale → texture. A group whose ops are
 /// identical to last frame's is left untouched (no raster, no upload).
 ///
-/// Each tile owns one `SKMutableTexture` that is rewritten in place: creating
-/// a fresh `SKTexture` per raster makes SpriteKit dispatch an async upload
-/// each time, which measured ~20% of a core in worker-thread churn.
+/// Rasters are RGBA (premultipliedLast) so `SKTexture(cgImage:)` can take the
+/// pixels without a vImage format conversion. (An `SKMutableTexture` rewritten
+/// in place was tried and rejected: its row order was inconsistent between
+/// headless and on-screen rendering.)
 final class CanvasTileLayer: SKNode {
     private final class Tile {
         let node = SKSpriteNode()
         var ops: [DrawOp] = []
         var rect: CGRect = .null
         var context: CGContext?
-        var texture: SKMutableTexture?
         var contextPixels = (w: 0, h: 0)
         var scale: Double = 0
         var anchored = false
@@ -88,28 +87,18 @@ final class CanvasTileLayer: SKNode {
                 let px = CGReplay.pixelSize(rect, scale: scale)
                 if tile.context == nil || tile.contextPixels != px {
                     tile.context = CGReplay.makeBitmap(pixelWidth: px.w, pixelHeight: px.h)
-                    let tex = SKMutableTexture(size: CGSize(width: px.w, height: px.h),
-                                               pixelFormat: Int32(kCVPixelFormatType_32BGRA))
-                    tex.filteringMode = .nearest
-                    tile.texture = tex
                     tile.contextPixels = px
                 }
-                guard let ctx = tile.context, let texture = tile.texture, let data = ctx.data else { continue }
-                // modifyPixelData is annotated @Sendable but runs its block synchronously
-                // on this thread before returning (verified), so the buffer can't race.
-                nonisolated(unsafe) let src = data
+                guard let ctx = tile.context else { continue }
                 CGReplay.renderTile(group.ops, in: ctx, rect: rect, scale: scale)
                 if Log.isDebug {
                     statRasters[group.key, default: 0] += 1
                     statPixels += px.w * px.h
                 }
-                // Synchronous; memory row 0 is the top row in both buffers.
-                let byteCount = px.w * px.h * 4
-                texture.modifyPixelData { dst, length in
-                    guard let dst else { return }
-                    dst.copyMemory(from: src, byteCount: min(byteCount, length))
-                }
-                if tile.node.texture !== texture { tile.node.texture = texture }
+                guard let image = ctx.makeImage() else { continue }
+                let texture = SKTexture(cgImage: image)
+                texture.filteringMode = .nearest
+                tile.node.texture = texture
                 tile.node.size = rect.size
                 tile.node.isHidden = false
                 tile.rect = rect
