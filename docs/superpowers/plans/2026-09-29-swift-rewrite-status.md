@@ -16,7 +16,7 @@
 - CPU (release, full flock at night, 60 fps): ~13–18%. Floor with no canvas
   drawing is ~5.7%.
 
-## Whole-branch review — concurrency/robustness reviewer findings (verified by reviewer, not yet fixed)
+## Whole-branch review — concurrency/robustness findings (all 13 FIXED, commits de8d4e1..HEAD)
 Medium:
 1. `easter:fg` / `summer:fg` (and `easter:bg`) are near-full-screen tiles that
    re-raster every frame while a season is active → make petals, seeds and
@@ -41,11 +41,18 @@ Low:
 12. `OverlayHost` force-unwraps `NSScreen.main` (no display → crash).
 13. `FriendMemory.removeBrain` caches non-`.json` files as brains.
 
-The other three reviewers (sim/glue parity, backend/data parity,
-rendering/UI parity) were stopped before reporting and should be rerun.
+Fix notes: seasonal layers now use per-element anchored tiles (≈91k px/frame
+rasterized with both seasons forced on, down from ~a full screen);
+unparseable brain/state files are quarantined to `<name>.corrupt-<ts>`;
+prerequisite bubbles announce once per reason; weather cache keyed by location
+with a 5-min failure back-off; MCP not started when config.json is corrupt.
+
+The other three reviewers (sim/glue, backend/data, rendering/UI parity) were
+re-run after the usage-limit pause.
 
 ## Remaining before the swap
-- [ ] Fix the findings above, then rerun the three stopped reviews.
+- [x] Fix the concurrency/robustness findings.
+- [ ] Triage + fix the three parity reviews.
 - [ ] Manual checklist in the real app: grant Screen Recording; drag, toss,
       stack, trampoline; pet; double-click; file drop; chat (right-click);
       capture moment; all debug spectacles; force feud; the settings, brain,

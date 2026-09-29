@@ -2187,7 +2187,10 @@ struct FlockDrawTests {
             world.step(flock)
             let canvas = frame(flock)
             for key in ["easter:bg", "summer:bg", "easter:mid", "summer:mid", "easter:fg", "summer:fg"] {
-                #expect(canvas.groups.first { $0.key == key }?.ops.isEmpty == false, "\(key)")
+                // Themes draw into the group itself or into per-element sub-groups
+                // ("<key>:…") so moving particles get small anchored tiles.
+                let ops = canvas.groups.filter { $0.key == key || $0.key.hasPrefix(key + ":") }.flatMap(\.ops)
+                #expect(!ops.isEmpty, "\(key)")
             }
         }
     }

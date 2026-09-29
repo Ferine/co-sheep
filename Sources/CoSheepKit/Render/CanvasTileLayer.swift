@@ -30,6 +30,8 @@ final class CanvasTileLayer: SKNode {
 
     private var tiles: [String: Tile] = [:]
     private(set) var rasterizedLastFrame = 0
+    /// Device pixels rasterized in the last `sync` (perf regression tests).
+    private(set) var rasterizedPixelsLastFrame = 0
     // Debug stats (CO_SHEEP_DEBUG): per-key raster counts + pixel area.
     private var statFrames = 0
     private var statRasters: [String: Int] = [:]
@@ -41,6 +43,7 @@ final class CanvasTileLayer: SKNode {
     func sync(_ groups: [CanvasGroup], viewport: CGRect, scale: Double) {
         var seen = Set<String>()
         var rasterized = 0
+        var pixels = 0
         var worldIndex = 0
         var overlayIndex = 0
 
@@ -91,6 +94,7 @@ final class CanvasTileLayer: SKNode {
                 }
                 guard let ctx = tile.context else { continue }
                 CGReplay.renderTile(group.ops, in: ctx, rect: rect, scale: scale)
+                pixels += px.w * px.h
                 if Log.isDebug {
                     statRasters[group.key, default: 0] += 1
                     statPixels += px.w * px.h
@@ -117,6 +121,7 @@ final class CanvasTileLayer: SKNode {
             tiles[key] = nil
         }
         rasterizedLastFrame = rasterized
+        rasterizedPixelsLastFrame = pixels
         if Log.isDebug {
             statFrames += 1
             if statFrames == 300 {

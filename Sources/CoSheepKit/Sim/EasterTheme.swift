@@ -522,9 +522,13 @@ final class EasterTheme: EasterThemeHooks {
                      rotationSpeed: rotationSpeed, size: size)
     }
 
+    // Tiles: these layers span the screen, so each moving element gets its
+    // own small group anchored at its position (drift = node move, sway/spin =
+    // re-raster of a tiny tile) instead of one screen-wide tile per frame.
+
     func drawBackground(_ ctx: Canvas, _ w: Double, _ h: Double) {
         if !active { return }
-        drawGroundWash(ctx, w, h)
+        ctx.group("easter:bg:wash") { drawGroundWash(ctx, w, h) }
         drawFlowers(ctx, w, h)
     }
 
@@ -537,7 +541,7 @@ final class EasterTheme: EasterThemeHooks {
         if !active { return }
         drawSparkles(ctx, w, h)
         drawPetals(ctx)
-        drawHud(ctx, w, h)
+        ctx.group("easter:fg:hud") { drawHud(ctx, w, h) }
     }
 
     private func drawGroundWash(_ ctx: Canvas, _ w: Double, _ h: Double) {
@@ -552,9 +556,10 @@ final class EasterTheme: EasterThemeHooks {
 
     private func drawFlowers(_ ctx: Canvas, _ w: Double, _ h: Double) {
         ctx.save()
-        for flower in flowers {
+        for (index, flower) in flowers.enumerated() {
             let fx = flower.x * w
             let fy = flower.y * h
+            ctx.group("easter:bg:flower:\(index)", anchor: CGPoint(x: fx, y: fy)) {
             let sway = sin(time * flower.swaySpeed + flower.swayOffset) * 3
             let scale = flower.size * 3
 
@@ -580,17 +585,19 @@ final class EasterTheme: EasterThemeHooks {
             ctx.beginPath()
             ctx.arc(fx + sway, fy, (2 * scale) / 3, 0, Double.pi * 2)
             ctx.fill()
+            }
         }
         ctx.restore()
     }
 
     private func drawEggs(_ ctx: Canvas, _ w: Double, _ h: Double) {
         ctx.save()
-        for egg in eggs {
+        for (index, egg) in eggs.enumerated() {
             if egg.found { continue }
 
             let ex = egg.x * w
             let ey = egg.y * h
+            ctx.group("easter:mid:egg:\(index)", anchor: CGPoint(x: ex, y: ey)) {
             let eggW: Double = egg.isGolden ? 7 : 6
             let eggH: Double = egg.isGolden ? 9 : 8
 
@@ -612,6 +619,7 @@ final class EasterTheme: EasterThemeHooks {
             ctx.fill()
 
             drawGrassTufts(ctx, ex, ey, egg.hiddenness)
+            }
         }
         ctx.restore()
     }
@@ -678,9 +686,11 @@ final class EasterTheme: EasterThemeHooks {
     }
 
     private func drawSparkles(_ ctx: Canvas, _ w: Double, _ h: Double) {
-        for egg in eggs {
+        for (index, egg) in eggs.enumerated() {
             if !egg.found || egg.sparkleTimer <= 0 { continue }
-            drawSparkle(ctx, egg.x * w, egg.y * h, egg.sparkleTimer, egg.isGolden)
+            ctx.group("easter:fg:sparkle:\(index)", anchor: CGPoint(x: egg.x * w, y: egg.y * h)) {
+                drawSparkle(ctx, egg.x * w, egg.y * h, egg.sparkleTimer, egg.isGolden)
+            }
         }
     }
 
@@ -705,15 +715,17 @@ final class EasterTheme: EasterThemeHooks {
 
     private func drawPetals(_ ctx: Canvas) {
         ctx.save()
-        for petal in petals {
-            ctx.fillStyle = petal.color
-            ctx.save()
-            ctx.translate(petal.x, petal.y)
-            ctx.rotate(petal.rotation)
-            ctx.beginPath()
-            ctx.ellipse(0, 0, petal.size * 0.5, petal.size, 0, 0, Double.pi * 2)
-            ctx.fill()
-            ctx.restore()
+        for (index, petal) in petals.enumerated() {
+            ctx.group("easter:fg:petal:\(index)", anchor: CGPoint(x: petal.x, y: petal.y)) {
+                ctx.fillStyle = petal.color
+                ctx.save()
+                ctx.translate(petal.x, petal.y)
+                ctx.rotate(petal.rotation)
+                ctx.beginPath()
+                ctx.ellipse(0, 0, petal.size * 0.5, petal.size, 0, 0, Double.pi * 2)
+                ctx.fill()
+                ctx.restore()
+            }
         }
         ctx.restore()
     }

@@ -287,9 +287,12 @@ final class SummerTheme {
         if !active { return }
 
         ctx.save()
-        for f in sunflowers {
+        // One small anchored tile per element (see EasterTheme): no
+        // screen-wide re-raster every frame.
+        for (index, f) in sunflowers.enumerated() {
             let x = f.x * w
             let baseY = f.y * h
+            ctx.group("summer:mid:flower:\(index)", anchor: CGPoint(x: x, y: baseY)) {
             let sway = sin((time / 1000) * f.swaySpeed + f.swayOffset) * 3
             let headX = x + sway
             let headY = baseY - f.size
@@ -332,6 +335,7 @@ final class SummerTheme {
             ctx.beginPath()
             ctx.arc(headX, headY, petalR * 0.55, 0, Double.pi * 2)
             ctx.fill()
+            }
         }
         ctx.restore()
     }
@@ -346,7 +350,8 @@ final class SummerTheme {
         ctx.fillStyle = "rgba(255, 255, 255, 0.85)"
         ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
         ctx.lineWidth = 1
-        for s in seeds {
+        for (index, s) in seeds.enumerated() {
+            ctx.group("summer:fg:seed:\(index)", anchor: CGPoint(x: s.x, y: s.y)) {
             ctx.beginPath()
             ctx.arc(s.x, s.y, s.size * 0.6, 0, Double.pi * 2)
             ctx.fill()
@@ -358,10 +363,12 @@ final class SummerTheme {
                 ctx.lineTo(s.x + cos(angle) * s.size * 2, s.y + sin(angle) * s.size * 2)
                 ctx.stroke()
             }
+            }
         }
 
         // Butterflies: two flapping wings and a body
-        for b in butterflies {
+        for (index, b) in butterflies.enumerated() {
+            ctx.group("summer:fg:butterfly:\(index)", anchor: CGPoint(x: b.x, y: b.y)) {
             let flap = abs(sin(b.wingPhase))
             let wingW = 6 * (0.35 + flap * 0.65)
             ctx.fillStyle = b.color
@@ -375,6 +382,7 @@ final class SummerTheme {
             ctx.beginPath()
             ctx.ellipse(b.x, b.y, 1.4, 4.5, 0, 0, Double.pi * 2)
             ctx.fill()
+            }
         }
 
         ctx.restore()
