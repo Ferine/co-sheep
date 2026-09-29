@@ -2,11 +2,45 @@ import AppKit
 import ImageIO
 import SpriteKit
 
+/// SKView that accepts file drops (ex-document `drop` listener) and gets
+/// mouseMoved via a tracking area (ex-document `mousemove`). Events only
+/// arrive while the panel is interactive, exactly like the webview.
+final class OverlaySKView: SKView {
+    /// File URL + drop point in canvas coordinates.
+    var onFileDrop: ((URL, Double, Double) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL])
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func mouseMoved(with event: NSEvent) {
+        scene?.mouseMoved(with: event)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                         options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        guard let url = urls?.first else { return false }
+        let p = convert(sender.draggingLocation, from: nil)
+        onFileDrop?(url, Double(p.x), Double(bounds.height - p.y))
+        return true
+    }
+}
+
 /// Owns the overlay window stack: panel → SKView → OverlayScene, sized to
 /// the primary screen. Canvas coordinates == global top-left screen points.
 final class OverlayHost {
     let panel: OverlayPanel
-    let view: SKView
+    let view: OverlaySKView
     let scene: OverlayScene
     private(set) var screenFrame: NSRect
     private var interactive = false
@@ -15,7 +49,7 @@ final class OverlayHost {
         let screen = NSScreen.screens.first ?? NSScreen.main!
         screenFrame = screen.frame
         panel = OverlayPanel(frame: screenFrame)
-        view = SKView(frame: NSRect(origin: .zero, size: screenFrame.size))
+        view = OverlaySKView(frame: NSRect(origin: .zero, size: screenFrame.size))
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
         view.preferredFramesPerSecond = 60
