@@ -6,7 +6,9 @@ final class OverlayController: OverlayDriver {
     private let host: OverlayHost
     private let app: AppController
     let flock: Flock
-    // MANAGERS-TODO: dramaManager / gossipManager / mcpCompanion
+    private let dramaManager: DramaManager
+    private let gossipManager: GossipManager
+    private let mcpCompanion: McpCompanion
     private let breakReminder = BreakReminder()
     private var personality = "snarky"
 
@@ -49,13 +51,24 @@ final class OverlayController: OverlayDriver {
             }
         }
 
-        // MANAGERS-TODO: construct DramaManager / GossipManager / McpCompanion
+        dramaManager = DramaManager(flock)
+        gossipManager = GossipManager(flock)
+        mcpCompanion = McpCompanion(flock)
     }
 
     // MARK: - Startup (ex-init)
 
     func start() {
-        // MANAGERS-TODO: start managers + showdown/spectacle hooks
+        dramaManager.start()
+        dramaManager.onDramaTriggeredSpectacle = { [weak self] kind, pair in
+            self?.flock.startSpectacle(kind, pair)
+        }
+        flock.onShowdownResolved = { [weak self] pair, reconciled in
+            self?.dramaManager.resolveShowdown(pair, reconciled)
+        }
+        gossipManager.start()
+        mcpCompanion.start()
+        Log.info("app", "MCP companion listening for sheep-session events")
 
         let events = AppEvents.shared
 
@@ -103,7 +116,7 @@ final class OverlayController: OverlayDriver {
         unsubscribers.append(events.addFriend.on { [weak self] cfg in self?.flock.addFriend(cfg) })
         unsubscribers.append(events.removeFriend.on { [weak self] id in
             self?.flock.removeFriend(id)
-            // MANAGERS-TODO: self?.dramaManager.onFriendRemoved(id)
+            self?.dramaManager.onFriendRemoved(id)
         })
         unsubscribers.append(events.settingsChanged.on { [weak self] cfg in self?.applySettings(cfg) })
         unsubscribers.append(events.captureMoment.on { [weak self] in
@@ -318,7 +331,7 @@ final class OverlayController: OverlayDriver {
     private func debugCommand(_ cmd: String) {
         Log.info("app", "debug-command: \(cmd)")
         if cmd == "force-feud" {
-            let key: String? = nil // MANAGERS-TODO: dramaManager.forceFeud()
+            let key = dramaManager.forceFeud()
             flock.mainBubble.show(key.map { "Feud forced: \($0)" } ?? "No pair available to feud.", duration: 4000)
         } else if cmd.hasPrefix("spectacle:"), let type = SpectacleType(rawValue: String(cmd.dropFirst("spectacle:".count))) {
             if type == .showdown || type == .feast {
