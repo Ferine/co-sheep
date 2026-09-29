@@ -52,12 +52,14 @@ re-run after the usage-limit pause.
 
 ## Remaining before the swap
 - [x] Fix the concurrency/robustness findings.
-- [ ] Triage + fix the three parity reviews.
+- [x] Triage + fix the three parity reviews (sim/glue: 4 low; backend/data:
+      2 low; rendering/UI: 1 medium font-smoothing + 1 low chat-bubble
+      geometry + 3 latent Canvas edge cases — all fixed).
 - [ ] Manual checklist in the real app: grant Screen Recording; drag, toss,
       stack, trampoline; pet; double-click; file drop; chat (right-click);
       capture moment; all debug spectacles; force feud; the settings, brain,
       friends, wardrobe, relationships and naming windows; seasons forced on.
-- [ ] Swap commit: delete `src/`, `src-tauri/`, `public/`, `index.html`,
+- [x] Swap commit (on the branch; `main` keeps the Tauri app until merge): delete `src/`, `src-tauri/`, `public/`, `index.html`,
       the Node/Vite/TS/pnpm files and `scripts/{tauri-wrapper,build-apple-helper}.sh`.
       Replace `scripts/build-dmg.sh` with the Swift version (bundle release →
       hdiutil from `build/co-sheep.app`). Rewrite the README (badge,

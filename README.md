@@ -2,7 +2,7 @@
 
 A desktop companion sheep that watches your screen and delivers snarky commentary. Think unhinged Clippy meets a judgmental pixel art sheep — with friends.
 
-![Tauri](https://img.shields.io/badge/Tauri-v2-blue) ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Swift](https://img.shields.io/badge/Swift-6-orange) ![Platform](https://img.shields.io/badge/platform-macOS%2027-lightgrey)
 
 ![The sheep gang](docs/sheep-gang.png)
 
@@ -166,7 +166,7 @@ Settings are stored at `~/.co-sheep/config.json`.
 
 Available from the tray icon and macOS menu bar:
 
-- **Settings** — configure sheep name, personality, API, language
+- **Settings** — configure sheep name, personality, interval, language, weather, seasons
 - **Sheep's Brain** — view opinions, tallies, diary
 - **Manage Friends** — add/remove friends, set personalities, accessories
 - **Friend Relationships** — view affinity matrix and memories
@@ -177,105 +177,97 @@ Available from the tray icon and macOS menu bar:
 
 ## Requirements
 
-- macOS (uses CoreGraphics for cursor tracking and screen capture)
-- [Node.js](https://nodejs.org/) (v22+) with [pnpm](https://pnpm.io/) v11 (`corepack enable` picks the pinned version automatically)
-- [Rust](https://rustup.rs/) (stable)
-- macOS 26+ (Tahoe) on Apple Silicon with Apple Intelligence enabled — the AI runs entirely on-device
-- Xcode 26+ (for the FoundationModels SDK used by the bundled helper)
+- macOS 27 on Apple Silicon, with Apple Intelligence enabled (the AI runs entirely on-device)
+- Xcode 27 / Swift 6.4 toolchain to build
 
-## Setup
+## Build & run
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Run in development
-pnpm tauri dev
-
-# Build for production
-pnpm tauri build
+scripts/run.sh            # build (debug), bundle build/co-sheep.app, run with logs in the terminal
+scripts/bundle.sh release # just assemble + sign build/co-sheep.app
+scripts/build-dmg.sh      # release bundle → build/co-sheep_<version>_<arch>.dmg
+swift test                # ~1000 tests (Swift Testing)
 ```
 
-The `.app` bundle will be at `src-tauri/target/release/bundle/macos/co-sheep.app`.
+Dev knobs (environment variables):
+
+| Variable | Effect |
+|---|---|
+| `CO_SHEEP_DEBUG=1` | verbose logs, incl. per-tile raster stats |
+| `CO_SHEEP_HOME=/path` | use a scratch copy instead of `~/.co-sheep` |
+| `CO_SHEEP_FPS=30` | overlay frame rate (default 60) |
+| `CO_SHEEP_SNAPSHOT=/path.png` (+ `CO_SHEEP_SNAPSHOT_DELAY_MS`) | write a PNG of the overlay scene, no Screen Recording needed |
 
 ## Screen Recording Permission
 
-co-sheep needs screen recording permission to see your screen. On first launch:
+co-sheep needs screen recording permission to see your screen. On first launch
+macOS prompts you; grant it under **System Settings > Privacy & Security >
+Screen Recording** and restart co-sheep.
 
-1. macOS will prompt you to grant permission
-2. Go to **System Settings > Privacy & Security > Screen Recording**
-3. Add the co-sheep binary or `.app` bundle
-4. Restart co-sheep
+Ad-hoc signed builds get a new signature every build, so macOS asks again after
+each rebuild. Create a self-signed code-signing certificate named
+`co-sheep dev` in Keychain Access and `scripts/bundle.sh` will use it
+automatically (or set `CODESIGN_IDENTITY`).
 
 ## How it works
 
 ```
-[configurable timer, default ~2.5 min]
+[configurable timer, default ~2.5 min, ±20%]
     |
     v
-[xcap: capture screen -> resize 1568px -> JPEG q70 -> base64]
+[ScreenCaptureKit: capture primary display, longest side ≤ 1568px]
     |
     v
 [Vision OCR extracts on-screen text (on-device)]
     |
     v
-[Pass 1: on-device model classifies the screen text]
+[Pass 1: FoundationModels classifies the screen text]
     |
     +-- not interesting -> skip, log to diary
     |
     +-- interesting
          |
          v
-       [Pass 2: on-device model generates comment + animation + opinion + count]
+       [Pass 2: FoundationModels generates comment + animation + opinion + count]
          |
          v
        [Speech bubble + animation on sheep]
        [Update opinions.json + daily journal]
 ```
 
+Rendering: the flock's draw code uses a Canvas2D-shaped Swift API (`Canvas`)
+that records display lists; each character/effect group is rasterized with
+CoreGraphics into a small tile and composited by SpriteKit. Moving groups are
+anchored, so pure motion just moves a node. Rain, snow and the night sky are
+native SpriteKit particles.
+
 ## Project structure
 
 ```
 co-sheep/
-├── src/                         # TypeScript frontend
-│   ├── main.ts                  # Canvas loop, drag, interactions, event wiring
-│   ├── sheep.ts                 # State machine, physics, animations, personality idle
-│   ├── flock.ts                 # Multi-character orchestration, conversations, group activities
-│   ├── sprite.ts                # Sprite sheet loader and animator
-│   ├── speech-bubble.ts         # DOM speech bubble with typewriter effect
-│   ├── input-bubble.ts          # Chat input UI
-│   ├── conversations.ts         # 45+ conversation scripts (personality/time/weather-aware)
-│   ├── friend-personalities.ts  # Personality quip pools and animation biases
-│   ├── group-activities.ts      # Campfire circle, follow-leader, sync bounce, huddle
-│   ├── accessories.ts           # 18 drawable accessories (hats, glasses, capes, etc.)
-│   ├── night-ambience.ts        # Stars, moonlight, fireflies
-│   ├── weather-effects.ts       # Rain and snow particles
-│   ├── break-reminder.ts        # 45-min work break nudges
-│   └── types.ts                 # Shared types
-├── src-tauri/src/               # Rust backend
-│   ├── lib.rs                   # App builder, tray, menu bar, commands
-│   ├── vision.rs                # Two-pass AI vision pipeline + friend AI chat
-│   ├── capture.rs               # Screen capture via xcap
-│   ├── personality.rs           # Personality presets + system prompts
-│   ├── memory.rs                # Opinion system, daily journal, brain viewer
-│   ├── friend_memory.rs         # Per-friend brain, relationships, mood
-│   ├── weather.rs               # Weather fetching + caching (wttr.in)
-│   ├── onboarding.rs            # Config, first-launch flow, settings
-│   ├── cursor.rs                # CoreGraphics cursor tracking
-│   └── permissions.rs           # macOS screen recording permission
-└── public/
-    ├── settings.html            # Settings window
-    ├── memory.html              # Brain viewer window
-    ├── friends.html             # Friend management (personality, accessories)
-    ├── friend-memory.html       # Relationship viewer (affinity, memories)
-    ├── wardrobe.html            # Accessory picker with preview
-    ├── naming.html              # Naming dialog window
-    └── assets/sprites/          # Pixel art sprite sheets
+├── Package.swift                 # SwiftPM: CoSheep (app) + CoSheepKit (library) + tests
+├── Sources/CoSheep/main.swift    # NSApplication bootstrap
+├── Sources/CoSheepKit/
+│   ├── App/        # AppDelegate, AppController (backend commands), menus, windows
+│   ├── Overlay/    # transparent click-through panel, SpriteKit scene, input, chat bubble
+│   ├── Render/     # Canvas API, display lists, CoreGraphics replay, tiles, sprites
+│   ├── Sim/        # Sheep, Flock, bubbles, accessories, conversations, drama,
+│   │               # spectacles, group activities, seasons, night, weather, managers
+│   ├── Brain/      # config, opinions, journal, friend memory, reflection
+│   ├── Services/   # FoundationModels + OCR, capture, weather, app watch, vision pipeline
+│   ├── MCP/        # zero-dependency Streamable HTTP MCP server
+│   ├── UI/         # SwiftUI windows: settings, brain, friends, wardrobe, naming, relationships
+│   └── Resources/  # sprite sheets, icons
+├── Tests/CoSheepKitTests/
+└── scripts/        # bundle.sh, run.sh, build-dmg.sh
 ```
 
 ## Cost & privacy
 
-Zero API cost — everything runs on Apple's on-device foundation model. Your screen content never leaves your Mac: Apple's model is text-only for third-party apps, so the sheep "sees" your screen through on-device Vision OCR (extracted text) rather than the actual pixels. The helper binary that bridges to the FoundationModels framework is built automatically by `pnpm run build:tauri` (requires Xcode 26+; older Xcode builds a stub that reports the AI as unavailable).
+Zero API cost — everything runs on Apple's on-device foundation model. Your
+screen content never leaves your Mac: the sheep "sees" your screen through
+on-device Vision OCR (extracted text) rather than the actual pixels. The MCP
+server only listens on `127.0.0.1`.
 
 ## License
 

@@ -1,38 +1,24 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+# Package build/co-sheep.app into build/co-sheep_<version>_<arch>.dmg.
+#   scripts/build-dmg.sh          (builds a release bundle first)
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-CONFIG_PATH="$ROOT_DIR/src-tauri/tauri.conf.json"
+bash scripts/bundle.sh release
 
-PRODUCT_NAME=$(node -e "const c=require(process.argv[1]); process.stdout.write(c.productName);" "$CONFIG_PATH")
-VERSION=$(node -e "const c=require(process.argv[1]); process.stdout.write(c.version);" "$CONFIG_PATH")
+APP="build/co-sheep.app"
+VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 ARCH=$(uname -m)
+OUT_DMG="build/co-sheep_${VERSION}_${ARCH}.dmg"
+STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/co-sheep-dmg.XXXXXX")
+trap 'rm -rf "$STAGE_DIR"' EXIT INT TERM
 
-APP_PATH="$ROOT_DIR/src-tauri/target/release/bundle/macos/$PRODUCT_NAME.app"
-OUT_DIR="$ROOT_DIR/src-tauri/target/release/bundle/dmg"
-OUT_DMG="$OUT_DIR/${PRODUCT_NAME}_${VERSION}_${ARCH}.dmg"
-STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/$PRODUCT_NAME-dmg.XXXXXX")
-
-cleanup() {
-  rm -rf "$STAGE_DIR"
-}
-
-trap cleanup EXIT INT TERM
-
-if [ ! -d "$APP_PATH" ]; then
-  echo "Missing app bundle at $APP_PATH" >&2
-  exit 1
-fi
-
-mkdir -p "$OUT_DIR"
+cp -R "$APP" "$STAGE_DIR/"
+ln -s /Applications "$STAGE_DIR/Applications"
 rm -f "$OUT_DMG"
 
-cp -R "$APP_PATH" "$STAGE_DIR/"
-ln -s /Applications "$STAGE_DIR/Applications"
-
 hdiutil create \
-  -volname "$PRODUCT_NAME" \
+  -volname "co-sheep" \
   -srcfolder "$STAGE_DIR" \
   -fs HFS+ \
   -format UDZO \

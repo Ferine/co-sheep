@@ -1,12 +1,8 @@
-# Dependencies
+# Legacy Tauri/web artifacts that may still exist in old checkouts
 node_modules/
-
-# Build output
 dist/
 dist-ssr/
-
-# Rust build output
-src-tauri/target/
+src-tauri/
 
 # Logs
 *.log
