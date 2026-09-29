@@ -168,7 +168,12 @@ private final class InputBubbleView: NSView {
         replyText.textContainerInset = .zero
         replyText.textContainer?.lineFragmentPadding = 0
         replyText.isVerticallyResizable = true
+        replyText.isHorizontallyResizable = false
         replyText.autoresizingMask = [.width]
+        // Let the document view grow past the 120px clip so long replies scroll.
+        replyText.minSize = NSSize(width: 0, height: 0)
+        replyText.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        replyText.textContainer?.widthTracksTextView = true
         replyScroll.documentView = replyText
         replyScroll.drawsBackground = false
         replyScroll.hasVerticalScroller = true
