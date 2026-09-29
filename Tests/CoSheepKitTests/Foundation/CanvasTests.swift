@@ -117,6 +117,29 @@ struct CanvasTests {
         #expect(Canvas.normalizedSweep(0, .pi * 4, false) == (0, .pi * 2))
         #expect(Canvas.normalizedSweep(0, -.pi * 3, true) == (0, -.pi * 2))
         #expect(Canvas.normalizedSweep(1, 2, false) == (1, 2))
+        // A whole turn "the other way" is still a full circle (WebKit).
+        #expect(Canvas.normalizedSweep(0.5, 0.5 + .pi * 2, true) == (0.5, 0.5 - .pi * 2))
+        #expect(Canvas.normalizedSweep(0.5, 0.5 - .pi * 2, false) == (0.5, 0.5 + .pi * 2))
+    }
+
+    @Test func rectLeavesTheCurrentPointAtItsOrigin() {
+        let c = Canvas()
+        c.beginFrame()
+        c.beginPath()
+        c.roundRect(10, 10, 20, 20, 4)
+        c.lineTo(100, 10)          // spec: from (10, 10), not from the arc start
+        c.stroke()
+        guard case let .stroke(path, _, _) = c.groups[0].ops[0].kind else {
+            Issue.record("expected a stroke op")
+            return
+        }
+        var elements: [(CGPathElementType, CGPoint)] = []
+        path.applyWithBlock { e in
+            elements.append((e.pointee.type, e.pointee.type == .closeSubpath ? .zero : e.pointee.points[0]))
+        }
+        let tail = elements.suffix(2)
+        #expect(tail.first?.0 == .moveToPoint && tail.first?.1 == CGPoint(x: 10, y: 10))
+        #expect(tail.last?.0 == .addLineToPoint && tail.last?.1 == CGPoint(x: 100, y: 10))
     }
 
     @Test func arcAndEllipseBounds() {

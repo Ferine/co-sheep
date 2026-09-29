@@ -69,7 +69,7 @@ struct DrawOp: Equatable {
             r = p.boundingBoxOfPath.applying(ctm)
         case .stroke(let p, _, let s):
             let scale = max(hypot(ctm.a, ctm.b), hypot(ctm.c, ctm.d))
-            let bleed = s.lineWidth * scale * (s.lineJoin == .miter ? max(1, s.miterLimit / 2) : 1) / 2 + 1
+            let bleed = s.lineWidth * scale * (s.lineJoin == .miter ? max(1, s.miterLimit) : 1) / 2 + 1
             r = p.boundingBoxOfPath.applying(ctm).insetBy(dx: -bleed, dy: -bleed)
         case .text(let text, let font, let x, let y, let align, let baseline, _):
             r = TextGeometry.box(text, font, x: x, y: y, align: align, baseline: baseline).applying(ctm)

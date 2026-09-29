@@ -80,13 +80,17 @@ final class InputBubble {
         let bubbleX = sheepX + sheepSize / 2
         let bubbleY = sheepY - 20
         let halfW = Double(size.width) / 2
+        // The view includes the tail below the box; CSS sizes/positions the
+        // box alone (the tail is an absolutely positioned pseudo-element).
+        let tail = Double(BubbleStyle.tailOuter)
+        let boxH = Double(size.height) - tail
         let clampedX = max(halfW + 4, min(bubbleX, innerW - halfW - 4))
         // Clamp against the top edge too — the chat input must stay visible
         // even when the sheep is high up on a window platform
-        let clampedBottom = min(max(Double(size.height) + 16, innerH - bubbleY),
-                                innerH - Double(size.height) - 8)
-        // View coordinates are y-up, so CSS `bottom` is the frame's y.
-        view.frame = NSRect(x: clampedX - halfW, y: clampedBottom, width: Double(size.width),
+        let clampedBottom = min(max(boxH + 16, innerH - bubbleY), innerH - boxH - 8)
+        // View coordinates are y-up: CSS `bottom` is the box's bottom edge,
+        // so the view (box + tail) starts one tail height lower.
+        view.frame = NSRect(x: clampedX - halfW, y: clampedBottom - tail, width: Double(size.width),
                             height: Double(size.height))
     }
 }
@@ -101,6 +105,14 @@ private enum BubbleStyle {
     static let inputBackground = NSColor(srgbRed: 0x16 / 255, green: 0x21 / 255, blue: 0x3e / 255, alpha: 1)
     static let loading = NSColor(srgbRed: 0x88 / 255, green: 0x88 / 255, blue: 0x88 / 255, alpha: 1)
     static let error = NSColor(srgbRed: 1, green: 0x6b / 255, blue: 0x6b / 255, alpha: 1)
+
+    /// CSS `.speech-bubble-text { line-height: 1.4 }`.
+    static func textAttributes(_ font: NSFont, _ color: NSColor) -> [NSAttributedString.Key: Any] {
+        let p = NSMutableParagraphStyle()
+        p.minimumLineHeight = font.pointSize * 1.4
+        p.maximumLineHeight = font.pointSize * 1.4
+        return [.font: font, .foregroundColor: color, .paragraphStyle: p]
+    }
 
     static func font(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
         var font = NSFont(name: "Courier New", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
@@ -155,9 +167,8 @@ private final class InputBubbleView: NSView {
             return s
         }()
 
-        prompt.stringValue = promptText
-        prompt.font = BubbleStyle.font(14)
-        prompt.textColor = BubbleStyle.text
+        prompt.attributedStringValue = NSAttributedString(
+            string: promptText, attributes: BubbleStyle.textAttributes(BubbleStyle.font(14), BubbleStyle.text))
         prompt.isSelectable = false
 
         replyText.isEditable = false
@@ -268,9 +279,10 @@ private final class InputBubbleView: NSView {
         prompt.isHidden = true
         replyScroll.isHidden = false
         replyScroll.alphaValue = 1
-        replyText.string = text
-        replyText.font = BubbleStyle.font(14, italic: isError)
-        replyText.textColor = isError ? BubbleStyle.error : BubbleStyle.text
+        replyText.textStorage?.setAttributedString(NSAttributedString(
+            string: text,
+            attributes: BubbleStyle.textAttributes(BubbleStyle.font(14, italic: isError),
+                                                   isError ? BubbleStyle.error : BubbleStyle.text)))
         // CSS: max-height 120, overflow-y auto.
         if let lm = replyText.layoutManager, let tc = replyText.textContainer {
             tc.containerSize = NSSize(width: replyScroll.contentSize.width > 0 ? replyScroll.contentSize.width
@@ -298,13 +310,12 @@ private final class InputBubbleView: NSView {
         if on {
             // showReply hides the prompt line — bring it back for "thinking..."
             prompt.isHidden = false
-            prompt.stringValue = "thinking..."
-            prompt.font = BubbleStyle.font(14, italic: true)
-            prompt.textColor = BubbleStyle.loading
+            prompt.attributedStringValue = NSAttributedString(
+                string: "thinking...",
+                attributes: BubbleStyle.textAttributes(BubbleStyle.font(14, italic: true), BubbleStyle.loading))
         } else {
-            prompt.stringValue = promptText
-            prompt.font = BubbleStyle.font(14)
-            prompt.textColor = BubbleStyle.text
+            prompt.attributedStringValue = NSAttributedString(
+                string: promptText, attributes: BubbleStyle.textAttributes(BubbleStyle.font(14), BubbleStyle.text))
         }
     }
 

@@ -326,17 +326,23 @@ final class Canvas {
         let tau = Double.pi * 2
         if !ccw, end - start >= tau { return (start, start + tau) }
         if ccw, start - end >= tau { return (start, start - tau) }
+        // WebKit also draws the full circle when the sweep is a whole turn
+        // "the other way" (e.g. arc(a, a + 2π, true)).
+        if ccw, end - start >= tau { return (start, start - tau) }
+        if !ccw, start - end >= tau { return (start, start + tau) }
         return (start, end)
     }
 
     func rect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) {
         path.addRect(CGRect(x: x, y: y, width: w, height: h), transform: state.transform)
+        path.move(to: CGPoint(x: x, y: y), transform: state.transform)
     }
 
     func roundRect(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ radius: Double) {
         let r = CGRect(x: x, y: y, width: w, height: h).standardized
         let rr = max(0, min(radius, min(r.width, r.height) / 2))
         path.addRoundedRect(in: r, cornerWidth: rr, cornerHeight: rr, transform: state.transform)
+        path.move(to: CGPoint(x: x, y: y), transform: state.transform)
     }
 
     func closePath() { if !path.isEmpty { path.closeSubpath() } }

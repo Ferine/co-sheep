@@ -36,7 +36,8 @@ enum CGReplay {
         ctx.translateBy(x: 0, y: CGFloat(pixelHeight))
         ctx.scaleBy(x: scale, y: -scale)
         ctx.translateBy(x: -rect.minX, y: -rect.minY)
-        ctx.setShouldSmoothFonts(false)
+        // WebKit smooths canvas text; without it glyphs render ~25-40% lighter.
+        ctx.setShouldSmoothFonts(true)
         ctx.setAllowsAntialiasing(true)
         ctx.setShouldAntialias(true)
     }

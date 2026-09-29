@@ -113,7 +113,9 @@ struct AccessoriesTests {
             let c = Canvas()
             c.beginFrame()
             c.group("a") { antenna.draw(c, 100, 200, 96, true, .idle) }
-            return c.groups[0].bounds.minY
+            // ops[0] is the wire stroke (its conservative miter bleed covers the
+            // bobble's range); ops[1] is the bobble fill itself.
+            return c.groups[0].ops[1].bounds.minY
         }
         #expect(bobbleY(at: 0) != bobbleY(at: 500 * .pi / 2))
     }
