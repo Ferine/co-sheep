@@ -206,3 +206,52 @@ struct JSONValueTests {
         #expect(again == v)
     }
 }
+
+@Suite("canvas anchors")
+struct CanvasAnchorTests {
+    private func frame(_ c: Canvas, at x: Double, _ y: Double) -> [DrawOp] {
+        c.beginFrame()
+        c.group("s", anchor: CGPoint(x: x, y: y)) {
+            // Absolute-coordinate drawing, like Sheep.draw.
+            c.fillStyle = "#abc"
+            c.beginPath()
+            c.arc(x + 62.4, y + 11.7, 5, 0, .pi * 2)
+            c.fill()
+            c.fillText("Fluffy", x + 10, y + 90)
+            // translate()-positioned drawing, like the flipped sprite.
+            c.save()
+            c.translate(x + 96, y)
+            c.scale(-1, 1)
+            c.fillRect(0, 0, 3, 3)
+            c.restore()
+        }
+        return c.groups[0].ops
+    }
+
+    @Test func pureMotionKeepsOpsEqual() {
+        let c = Canvas()
+        let a = frame(c, at: 100.3, 200.7)
+        let b = frame(c, at: 517.9, 13.1)
+        #expect(a == b)
+    }
+
+    @Test func realChangeStillDiffers() {
+        let c = Canvas()
+        let a = frame(c, at: 100, 200)
+        c.beginFrame()
+        c.group("s", anchor: CGPoint(x: 100, y: 200)) {
+            c.fillStyle = "#abd"
+            c.beginPath()
+            c.arc(162.4, 211.7, 5, 0, .pi * 2)
+            c.fill()
+        }
+        #expect(a != c.groups[0].ops)
+    }
+
+    @Test func anchoredBoundsAreRelative() {
+        let c = Canvas()
+        c.beginFrame()
+        c.group("s", anchor: CGPoint(x: 1000, y: 500)) { c.fillRect(1010, 520, 4, 4) }
+        #expect(c.groups[0].bounds == CGRect(x: 10, y: 20, width: 4, height: 4))
+    }
+}

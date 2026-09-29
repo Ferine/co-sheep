@@ -1,16 +1,24 @@
 import CoreGraphics
+import CoreVideo
 import SpriteKit
 
 /// Turns each frame's `CanvasGroup`s into textured `SKSpriteNode`s: bbox →
 /// CoreGraphics raster at backing scale → texture. A group whose ops are
 /// identical to last frame's is left untouched (no raster, no upload).
+///
+/// Each tile owns one `SKMutableTexture` that is rewritten in place: creating
+/// a fresh `SKTexture` per raster makes SpriteKit dispatch an async upload
+/// each time, which measured ~20% of a core in worker-thread churn.
 final class CanvasTileLayer: SKNode {
     private final class Tile {
         let node = SKSpriteNode()
         var ops: [DrawOp] = []
         var rect: CGRect = .null
         var context: CGContext?
+        var texture: SKMutableTexture?
         var contextPixels = (w: 0, h: 0)
+        var scale: Double = 0
+        var anchored = false
 
         init() {
             node.anchorPoint = CGPoint(x: 0, y: 1)
@@ -23,6 +31,10 @@ final class CanvasTileLayer: SKNode {
 
     private var tiles: [String: Tile] = [:]
     private(set) var rasterizedLastFrame = 0
+    // Debug stats (CO_SHEEP_DEBUG): per-key raster counts + pixel area.
+    private var statFrames = 0
+    private var statRasters: [String: Int] = [:]
+    private var statPixels = 0
 
     /// - Parameters:
     ///   - viewport: visible canvas-space rect (the screen); tiles are clipped to it.
@@ -53,33 +65,62 @@ final class CanvasTileLayer: SKNode {
                 overlayIndex += 1
             }
 
-            if group.ops == tile.ops, tile.node.texture != nil || group.ops.isEmpty { continue }
-            tile.ops = group.ops
+            let anchor = group.anchor ?? .zero
+            let unchanged = group.ops == tile.ops && tile.scale == scale
+                && tile.anchored == (group.anchor != nil) && (tile.node.texture != nil || group.ops.isEmpty)
+            if !unchanged {
+                tile.ops = group.ops
+                tile.scale = scale
+                tile.anchored = group.anchor != nil
+                // Anchored content may move without re-rasterizing, so clip it
+                // generously (a screen's margin) rather than to the viewport.
+                let clip = group.anchor == nil
+                    ? viewport
+                    : viewport.insetBy(dx: -viewport.width, dy: -viewport.height).offsetBy(dx: -anchor.x, dy: -anchor.y)
+                let rect = Self.snap(group.bounds.intersection(clip), scale: scale)
+                guard !rect.isNull, rect.width >= 1 / scale, rect.height >= 1 / scale else {
+                    tile.node.isHidden = true
+                    tile.node.texture = nil
+                    tile.rect = .null
+                    continue
+                }
 
-            let rect = Self.snap(group.bounds.intersection(viewport), scale: scale)
-            guard !rect.isNull, rect.width >= 1 / scale, rect.height >= 1 / scale else {
-                tile.node.isHidden = true
-                tile.node.texture = nil
-                continue
+                let px = CGReplay.pixelSize(rect, scale: scale)
+                if tile.context == nil || tile.contextPixels != px {
+                    tile.context = CGReplay.makeBitmap(pixelWidth: px.w, pixelHeight: px.h)
+                    let tex = SKMutableTexture(size: CGSize(width: px.w, height: px.h),
+                                               pixelFormat: Int32(kCVPixelFormatType_32BGRA))
+                    tex.filteringMode = .nearest
+                    tile.texture = tex
+                    tile.contextPixels = px
+                }
+                guard let ctx = tile.context, let texture = tile.texture, let data = ctx.data else { continue }
+                // modifyPixelData is annotated @Sendable but runs its block synchronously
+                // on this thread before returning (verified), so the buffer can't race.
+                nonisolated(unsafe) let src = data
+                CGReplay.renderTile(group.ops, in: ctx, rect: rect, scale: scale)
+                if Log.isDebug {
+                    statRasters[group.key, default: 0] += 1
+                    statPixels += px.w * px.h
+                }
+                // Synchronous; memory row 0 is the top row in both buffers.
+                let byteCount = px.w * px.h * 4
+                texture.modifyPixelData { dst, length in
+                    guard let dst else { return }
+                    dst.copyMemory(from: src, byteCount: min(byteCount, length))
+                }
+                if tile.node.texture !== texture { tile.node.texture = texture }
+                tile.node.size = rect.size
+                tile.node.isHidden = false
+                tile.rect = rect
+                rasterized += 1
             }
-
-            let px = CGReplay.pixelSize(rect, scale: scale)
-            if tile.context == nil || tile.contextPixels != px {
-                tile.context = CGReplay.makeBitmap(pixelWidth: px.w, pixelHeight: px.h)
-                tile.contextPixels = px
-            }
-            guard let ctx = tile.context else { continue }
-            CGReplay.renderTile(group.ops, in: ctx, rect: rect, scale: scale)
-            guard let image = ctx.makeImage() else { continue }
-
-            let texture = SKTexture(cgImage: image)
-            texture.filteringMode = .nearest
-            tile.node.texture = texture
-            tile.node.size = rect.size
-            tile.node.position = CGPoint(x: rect.minX, y: viewport.maxY - rect.minY)
-            tile.node.isHidden = false
-            tile.rect = rect
-            rasterized += 1
+            guard !tile.rect.isNull else { continue }
+            // Position every frame — anchored tiles follow their anchor,
+            // snapped to device pixels so textures map 1:1.
+            let ox = ((anchor.x + tile.rect.minX) * scale).rounded() / scale
+            let oy = ((anchor.y + tile.rect.minY) * scale).rounded() / scale
+            tile.node.position = CGPoint(x: ox, y: viewport.maxY - oy)
         }
 
         for (key, tile) in tiles where !seen.contains(key) {
@@ -87,6 +128,17 @@ final class CanvasTileLayer: SKNode {
             tiles[key] = nil
         }
         rasterizedLastFrame = rasterized
+        if Log.isDebug {
+            statFrames += 1
+            if statFrames == 300 {
+                let top = statRasters.sorted { $0.value > $1.value }.prefix(8)
+                    .map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+                Log.debug("render", "300f: tiles=\(tiles.count) rasters=\(statRasters.values.reduce(0, +)) px/f=\(statPixels / 300) [\(top)]")
+                statFrames = 0
+                statRasters.removeAll()
+                statPixels = 0
+            }
+        }
     }
 
     /// Expand to whole device pixels so textures map 1:1 onto the screen.

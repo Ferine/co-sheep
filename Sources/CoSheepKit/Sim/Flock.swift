@@ -813,6 +813,12 @@ final class Flock {
 
     // MARK: Draw
 
+    /// Tile anchor that moves 1:1 with a bubble's content: CSS `left`, and
+    /// the canvas y of its `bottom` edge (CSS bottom runs opposite to y).
+    static func bubbleAnchor(_ b: SpeechBubble) -> CGPoint {
+        CGPoint(x: b.left ?? 0, y: SpeechBubble.viewport.height - (b.bottom ?? 0))
+    }
+
     func draw(_ ctx: Canvas) {
         let w = screenWidth
         let h = screenHeight
@@ -833,10 +839,10 @@ final class Flock {
         ctx.group("summer:mid") { summerTheme.drawMidground(ctx, w, h) }
 
         // Main sheep first (behind friends)
-        ctx.group("sheep:main") { main.draw(ctx) }
+        ctx.group("sheep:main", anchor: CGPoint(x: main.x, y: main.y)) { main.draw(ctx) }
         // Friends on top
         for (id, entry) in friends.entries {
-            ctx.group("sheep:\(id)") { entry.sheep.draw(ctx) }
+            ctx.group("sheep:\(id)", anchor: CGPoint(x: entry.sheep.x, y: entry.sheep.y)) { entry.sheep.draw(ctx) }
         }
 
         if let scene = spectacle {
@@ -858,10 +864,10 @@ final class Flock {
         // Speech bubbles were DOM elements above the canvas; they draw last,
         // in the overlay band above weather and night effects.
         if mainBubble.visible {
-            ctx.group("bubble:main", layer: .overlay) { mainBubble.draw(ctx) }
+            ctx.group("bubble:main", layer: .overlay, anchor: Self.bubbleAnchor(mainBubble)) { mainBubble.draw(ctx) }
         }
         for (id, entry) in friends.entries where entry.bubble.visible {
-            ctx.group("bubble:\(id)", layer: .overlay) { entry.bubble.draw(ctx) }
+            ctx.group("bubble:\(id)", layer: .overlay, anchor: Self.bubbleAnchor(entry.bubble)) { entry.bubble.draw(ctx) }
         }
     }
 

@@ -101,15 +101,19 @@ final class Canvas {
 
     /// Route everything drawn in `body` into the tile `key`. Groups are
     /// z-ordered by first use within their layer; reusing a key appends.
-    func group(_ key: String, layer: CanvasLayer = .world, _ body: () -> Void) {
-        groupStack.append(obtainGroup(key, layer: layer))
+    ///
+    /// `anchor` (e.g. the sheep's position) records ops relative to that
+    /// point: when content only moves, its ops stay equal and the tile is
+    /// repositioned instead of re-rasterized.
+    func group(_ key: String, layer: CanvasLayer = .world, anchor: CGPoint? = nil, _ body: () -> Void) {
+        groupStack.append(obtainGroup(key, layer: layer, anchor: anchor))
         body()
         groupStack.removeLast()
     }
 
-    private func obtainGroup(_ key: String, layer: CanvasLayer) -> CanvasGroup {
+    private func obtainGroup(_ key: String, layer: CanvasLayer, anchor: CGPoint? = nil) -> CanvasGroup {
         if let g = groupIndex[key] { return g }
-        let g = CanvasGroup(key: key, layer: layer, order: groups.count)
+        let g = CanvasGroup(key: key, layer: layer, order: groups.count, anchor: anchor)
         groups.append(g)
         groupIndex[key] = g
         return g
@@ -128,7 +132,22 @@ final class Canvas {
             Log.debug("canvas", "globalCompositeOperation '\(state.composite)' not supported; using source-over")
         }
         let target = groupStack.last ?? obtainGroup("_default", layer: .world)
-        target.ops.append(DrawOp(kind: kind, ctm: state.transform, alpha: alpha, shadow: shadow))
+        var kind = kind
+        var ctm = state.transform
+        if let a = target.anchor {
+            if ctm.a == 1, ctm.b == 0, ctm.c == 0, ctm.d == 1 {
+                // Pure translation (absolute-coordinate drawing): fold it
+                // into the geometry, relative to the anchor.
+                kind = kind.relocated(ctm.tx - a.x, ctm.ty - a.y)
+                ctm = .identity
+            } else {
+                // Positioned via translate(): shift the transform instead.
+                ctm = ctm.concatenating(CGAffineTransform(translationX: -a.x, y: -a.y))
+                ctm.tx = AnchorQuantize.q(ctm.tx)
+                ctm.ty = AnchorQuantize.q(ctm.ty)
+            }
+        }
+        target.ops.append(DrawOp(kind: kind, ctm: ctm, alpha: alpha, shadow: shadow))
     }
 
     // MARK: State

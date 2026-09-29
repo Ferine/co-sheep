@@ -135,15 +135,79 @@ final class CanvasGroup {
     let key: String
     let layer: CanvasLayer
     let order: Int
+    /// When set, ops are recorded relative to this canvas point (see
+    /// `Canvas.group(_:layer:anchor:_:)`), so pure motion leaves them equal.
+    let anchor: CGPoint?
     var ops: [DrawOp] = []
 
-    init(key: String, layer: CanvasLayer, order: Int) {
+    init(key: String, layer: CanvasLayer, order: Int, anchor: CGPoint? = nil) {
         self.key = key
         self.layer = layer
         self.order = order
+        self.anchor = anchor
     }
 
     var bounds: CGRect {
         ops.reduce(CGRect.null) { $0.union($1.bounds) }
+    }
+}
+
+// MARK: - Anchor-relative recording
+
+/// Geometry in anchored groups is snapped to 1/256 pt so that
+/// `(x + c) - x` float noise doesn't make identical content compare unequal.
+nonisolated enum AnchorQuantize {
+    static func q(_ v: Double) -> Double { (v * 256).rounded() / 256 }
+
+    static func path(_ path: CGPath, _ dx: Double, _ dy: Double) -> CGPath {
+        let out = CGMutablePath()
+        path.applyWithBlock { el in
+            let e = el.pointee
+            func p(_ i: Int) -> CGPoint {
+                CGPoint(x: q(e.points[i].x + dx), y: q(e.points[i].y + dy))
+            }
+            switch e.type {
+            case .moveToPoint: out.move(to: p(0))
+            case .addLineToPoint: out.addLine(to: p(0))
+            case .addQuadCurveToPoint: out.addQuadCurve(to: p(1), control: p(0))
+            case .addCurveToPoint: out.addCurve(to: p(2), control1: p(0), control2: p(1))
+            case .closeSubpath: out.closeSubpath()
+            @unknown default: break
+            }
+        }
+        return out
+    }
+}
+
+extension Paint {
+    func translated(_ dx: Double, _ dy: Double) -> Paint {
+        switch self {
+        case .color: self
+        case let .linear(x0, y0, x1, y1, stops):
+            .linear(x0: x0 + dx, y0: y0 + dy, x1: x1 + dx, y1: y1 + dy, stops: stops)
+        case let .radial(x0, y0, r0, x1, y1, r1, stops):
+            .radial(x0: x0 + dx, y0: y0 + dy, r0: r0, x1: x1 + dx, y1: y1 + dy, r1: r1, stops: stops)
+        }
+    }
+}
+
+extension DrawOp.Kind {
+    /// The same drawing moved by (dx, dy) in user space, quantized.
+    func relocated(_ dx: Double, _ dy: Double) -> DrawOp.Kind {
+        let q = AnchorQuantize.q
+        switch self {
+        case let .fill(path, paint, evenOdd):
+            return .fill(AnchorQuantize.path(path, dx, dy), paint.translated(dx, dy), evenOdd: evenOdd)
+        case let .stroke(path, paint, params):
+            return .stroke(AnchorQuantize.path(path, dx, dy), paint.translated(dx, dy), params)
+        case let .text(text, font, x, y, align, baseline, paint):
+            return .text(text, font, x: q(x + dx), y: q(y + dy), align: align, baseline: baseline, paint)
+        case let .image(image, dst, smoothing, tint):
+            return .image(image, dst: CGRect(x: q(dst.minX + dx), y: q(dst.minY + dy),
+                                             width: dst.width, height: dst.height),
+                          smoothing: smoothing, tint: tint)
+        case let .clear(path):
+            return .clear(AnchorQuantize.path(path, dx, dy))
+        }
     }
 }

@@ -52,7 +52,8 @@ final class OverlayHost {
         view = OverlaySKView(frame: NSRect(origin: .zero, size: screenFrame.size))
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
-        view.preferredFramesPerSecond = 60
+        // Same cadence as the webview's rAF by default; CO_SHEEP_FPS overrides.
+        view.preferredFramesPerSecond = ProcessInfo.processInfo.environment["CO_SHEEP_FPS"].flatMap(Int.init) ?? 60
         view.shouldCullNonVisibleNodes = true
         scene = OverlayScene(size: screenFrame.size)
         scene.backingScale = screen.backingScaleFactor

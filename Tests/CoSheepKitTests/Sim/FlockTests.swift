@@ -2140,9 +2140,12 @@ struct FlockDrawTests {
             #expect(!keys.contains("bubble:good_colleague"))
             let main = canvas.groups.first { $0.key == "bubble:main" }!
             #expect(!main.ops.isEmpty)
-            // The bubble sits above its sheep.
-            #expect(main.bounds.maxY <= flock.main.y + 30)
-            #expect(abs(main.bounds.midX - (flock.main.x + flock.main.displaySize / 2)) < 60)
+            // The bubble sits above its sheep (anchored groups record relative
+            // to their anchor, so map the bounds back to canvas space).
+            let a = main.anchor ?? .zero
+            let abs = main.bounds.offsetBy(dx: a.x, dy: a.y)
+            #expect(abs.maxY <= flock.main.y + 30)
+            #expect(Swift.abs(abs.midX - (flock.main.x + flock.main.displaySize / 2)) < 60)
         }
     }
 
