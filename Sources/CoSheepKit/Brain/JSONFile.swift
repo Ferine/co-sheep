@@ -51,7 +51,7 @@ enum JSONFile {
 
     static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return e
     }
 
