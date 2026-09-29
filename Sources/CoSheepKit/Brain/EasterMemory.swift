@@ -197,7 +197,7 @@ enum EasterMemory {
 
     private static func loadStats() -> EasterStats {
         guard FileManager.default.fileExists(atPath: Paths.easterStats.path) else { return defaultStats() }
-        return JSONFile.read(EasterStats.self, from: Paths.easterStats) ?? defaultStats()
+        return JSONFile.readOrQuarantine(EasterStats.self, from: Paths.easterStats) ?? defaultStats()
     }
 
     private static func saveStats(_ stats: EasterStats) {

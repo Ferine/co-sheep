@@ -169,7 +169,7 @@ enum FriendMemory {
     private static func readBrain(_ id: String) -> FriendBrain? {
         let path = friendPath(id)
         guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-        return JSONFile.read(FriendBrain.self, from: path)
+        return JSONFile.readOrQuarantine(FriendBrain.self, from: path)
     }
 
     private static func loadBrain(_ id: String) -> FriendBrain {

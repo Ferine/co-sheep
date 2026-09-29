@@ -15,8 +15,13 @@ enum LivingState {
     static func loadState(_ name: String) -> JSONValue {
         guard validName(name) else { return .null }
         let path = Paths.livingState(name)
-        guard let data = try? Data(contentsOf: path),
-              let value = try? JSONFile.decoder().decode(JSONValue.self, from: data) else { return .null }
+        guard let data = try? Data(contentsOf: path) else { return .null }
+        guard let value = try? JSONFile.decoder().decode(JSONValue.self, from: data) else {
+            // Invalid JSON: keep it aside rather than letting the next save
+            // (drama / spectacle state) overwrite it.
+            JSONFile.quarantine(path, reason: "invalid JSON")
+            return .null
+        }
         return value
     }
 

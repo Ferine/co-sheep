@@ -65,6 +65,33 @@ enum JSONFile {
         }
     }
 
+    /// Like `read`, for loaders that fall back to defaults and later save:
+    /// an existing file that fails to parse is first moved aside to
+    /// `<name>.corrupt-<unix-seconds>`, so that save can't destroy the
+    /// user's data (Rust silently overwrote it).
+    static func readOrQuarantine<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        do {
+            return try decoder().decode(T.self, from: data)
+        } catch {
+            quarantine(url, reason: "\(error)")
+            return nil
+        }
+    }
+
+    /// Move an unreadable file aside (see `readOrQuarantine`).
+    static func quarantine(_ url: URL, reason: String) {
+        let stamp = Int(SimClock.nowMs() / 1000)
+        let dest = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp)")
+        do {
+            try FileManager.default.moveItem(at: url, to: dest)
+            Log.info("brain", "error: \(url.lastPathComponent) failed to parse; moved aside to \(dest.lastPathComponent) (\(Log.truncateForLog(reason, maxBytes: 200)))")
+        } catch {
+            Log.info("brain", "error: \(url.lastPathComponent) failed to parse and could not be moved aside: \(error)")
+        }
+    }
+
     /// Strict read: throws on missing file or parse failure.
     static func readStrict<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
         try decoder().decode(T.self, from: Data(contentsOf: url))

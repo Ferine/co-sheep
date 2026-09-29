@@ -373,7 +373,7 @@ enum Memory {
 
     static func loadBrain() -> SheepBrain {
         guard FileManager.default.fileExists(atPath: Paths.opinions.path) else { return SheepBrain() }
-        var brain = JSONFile.read(SheepBrain.self, from: Paths.opinions) ?? SheepBrain()
+        var brain = JSONFile.readOrQuarantine(SheepBrain.self, from: Paths.opinions) ?? SheepBrain()
         normalizeOpinions(&brain.opinions)
 
         // Reset daily counts if it's a new day
