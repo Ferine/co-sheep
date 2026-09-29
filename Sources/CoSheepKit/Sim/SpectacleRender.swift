@@ -19,13 +19,13 @@ struct SpectacleWorld {
     /// app persists the new main-sheep accessory list and emits
     /// accessoriesChanged. nil = not wired, so the gift is skipped exactly as
     /// if the Tauri command had failed.
-    var saveAccessories: (([String]) -> Void)?
+    var saveAccessories: (([String]) -> Bool)?
 
     init(getCharacter: @escaping (String) -> FlockCharacter?,
          characterIds: @escaping () -> [String],
          screenW: Double,
          screenH: Double,
-         saveAccessories: (([String]) -> Void)? = nil) {
+         saveAccessories: (([String]) -> Bool)? = nil) {
         self.getCharacter = getCharacter
         self.characterIds = characterIds
         self.screenW = screenW
@@ -254,7 +254,7 @@ private func giftAccessory(_ world: SpectacleWorld) {
         Log.info("flock", "merchant gift failed: save_accessories is not wired")
         return
     }
-    save(owned + [gift])
+    guard save(owned + [gift]) else { return } // failed save: no "gift" bubble
     if let main = world.getCharacter("main") {
         if !main.bubble.visible { main.bubble.show("Ooh, a gift!", duration: 4000) }
         main.sheep.playAnimation(.bounce)

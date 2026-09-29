@@ -46,8 +46,12 @@ final class OverlayController: OverlayDriver {
             return try await app.friendAIChat(aId, aName, aPers, bId, bName, bPers, topic: topic)
         }
         flock.saveMainAccessories = { ids in
-            do { try WindowCommands.saveAccessories(ids) } catch {
+            do {
+                try WindowCommands.saveAccessories(ids)
+                return true
+            } catch {
                 Log.info("app", "error: Failed to save accessories: \(error)")
+                return false
             }
         }
 
@@ -222,10 +226,12 @@ final class OverlayController: OverlayDriver {
         hoverTarget = nil
         hoverTimer = 0
         target.grab()
+        host.view.dragging = true
         NSCursor.closedHand.set()
     }
 
     func mouseDragged(x: Double, y: Double) {
+        if isDragging { NSCursor.closedHand.set() }
         if isDragging, let dragTarget {
             dragTarget.x = x - dragOffsetX
             dragTarget.y = y - dragOffsetY
@@ -249,6 +255,7 @@ final class OverlayController: OverlayDriver {
                 }
             }
             dragTarget = nil
+            host.view.dragging = false
             NSCursor.openHand.set()
         }
         // DOM `dblclick` fires after the second mouseup.
@@ -309,6 +316,8 @@ final class OverlayController: OverlayDriver {
 
     // Right-click: open chat with main sheep
     func rightMouseDown(x: Double, y: Double) {
+        // The TS click-away listener was a `mousedown` — any button.
+        chatBubble?.handleMouseDown(x: x, y: y)
         if let target = flock.hitTest(x, y), target.id == "main" {
             openChat()
         }

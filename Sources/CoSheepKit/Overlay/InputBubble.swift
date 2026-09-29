@@ -18,9 +18,6 @@ final class InputBubble {
     private weak var host: OverlayHost?
     private(set) var isShown = false
 
-    /// Called on show/hide — the overlay must stay fully interactive while
-    /// shown (ex-`set_cursor_events { ignore: false }`).
-    var onVisibilityChanged: ((Bool) -> Void)?
 
     init(config: InputBubbleConfig, host: OverlayHost) {
         self.config = config
@@ -56,7 +53,6 @@ final class InputBubble {
     func show() {
         view.isHidden = false
         isShown = true
-        onVisibilityChanged?(true)
         host?.panel.makeKey()
         SimTimers.after(100) { [weak self] in self?.view.focusInput() }
     }
@@ -64,7 +60,6 @@ final class InputBubble {
     func hide() {
         view.isHidden = true
         isShown = false
-        onVisibilityChanged?(false)
     }
 
     func destroy() {

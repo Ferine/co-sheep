@@ -12,15 +12,24 @@ final class OverlaySKView: SKView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.fileURL])
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Cursor while the overlay is interactive (i.e. over a sheep, or chat
+    /// open): ex-CSS `body { cursor: grab }` / `body.dragging { cursor: grabbing }`.
+    var dragging = false
+
     override func mouseMoved(with event: NSEvent) {
         scene?.mouseMoved(with: event)
+        (dragging ? NSCursor.closedHand : NSCursor.openHand).set()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        (dragging ? NSCursor.closedHand : NSCursor.openHand).set()
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }

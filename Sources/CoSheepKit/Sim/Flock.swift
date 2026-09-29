@@ -302,7 +302,8 @@ final class Flock {
 
     /// ex-`invoke("save_accessories", …)` (merchant gift): the app wires this
     /// to persist the main sheep's accessory list and emit accessoriesChanged.
-    var saveMainAccessories: (([String]) -> Void)?
+    /// Returns whether the save succeeded (the TS gift bubble ran in `.then`).
+    var saveMainAccessories: (([String]) -> Bool)?
 
     // MARK: Init
 

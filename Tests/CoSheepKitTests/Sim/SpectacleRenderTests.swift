@@ -15,6 +15,7 @@ private final class Arena {
     let order: [String]
     var saved: [[String]] = []
     var saveWired = true
+    var saveSucceeds = true
 
     init(_ xs: [(String, Double)]) {
         order = xs.map { $0.0 }
@@ -38,7 +39,7 @@ private final class Arena {
             characterIds: { [unowned self] in self.order },
             screenW: W,
             screenH: H,
-            saveAccessories: saveWired ? { [unowned self] in self.saved.append($0) } : nil
+            saveAccessories: saveWired ? { [unowned self] in self.saved.append($0); return self.saveSucceeds } : nil
         )
     }
 
@@ -418,6 +419,19 @@ struct MerchantTests {
             #expect(SpectacleRenderData.GIFT_POOL.contains(gift))
             #expect(gift != "crown" && gift != "cape")
             #expect(arena.sheep("main").state == .bounce)
+        }
+    }
+
+    @Test func aFailedGiftSaveShowsNoGiftBubble() {
+        withRoot(accessories: []) {
+            let arena = Arena.standard()
+            arena.saveSucceeds = false
+            let scene = createSpectacleScene(.merchant, W, H, arena.order)
+            scene.phase = .perform
+            scene.timer = 6001
+            _ = updateSpectacleScene(scene, 16, arena.world)
+            #expect(arena.saved.count == 1)                 // the save was attempted
+            #expect(arena.bubble("main").currentText != "Ooh, a gift!")
         }
     }
 

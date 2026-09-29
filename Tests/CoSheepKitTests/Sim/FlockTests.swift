@@ -1978,7 +1978,7 @@ struct FlockSpectacleTests {
         withWorld { world in
             let flock = stage()
             var saved: [[String]] = []
-            flock.saveMainAccessories = { saved.append($0) }
+            flock.saveMainAccessories = { saved.append($0); return true }
             flock.startSpectacle(.merchant)
             world.run(flock, maxFrames: 3000) { flock.spectacle == nil }
             #expect(saved.count == 1)
