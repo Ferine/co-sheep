@@ -153,7 +153,9 @@ struct AppWatchTests {
         watch.start() // second start is a no-op
         #expect(watch.isRunning)
 
-        let deadline = ContinuousClock.now + .seconds(5)
+        // Generous: the main actor is shared with long synchronous sim suites
+        // running in parallel, so wall-clock progress here can stall for seconds.
+        let deadline = ContinuousClock.now + .seconds(60)
         while seen.count < 2, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -161,6 +163,7 @@ struct AppWatchTests {
         #expect(!watch.isRunning)
 
         #expect(seen.map(\.app) == ["A", "B"])
+        try #require(seen.count == 2)
         #expect(seen[0].previousApp == nil)
         #expect(seen[1].previousApp == "A")
 
