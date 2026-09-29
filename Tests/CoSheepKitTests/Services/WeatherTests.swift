@@ -165,8 +165,8 @@ struct WeatherTests {
         #expect(script.calls.count == 2)
     }
 
-    @Test func aFailedRefreshReturnsTheStaleCache() async {
-        let script = FetchScript([.success(info("Sunny")), .failure(PlatformError("offline"))])
+    @Test func aFailedRefreshReturnsTheStaleCacheAndBacksOff() async {
+        let script = FetchScript([.success(info("Sunny")), .failure(PlatformError("offline")), .success(info("Rain"))])
         let clock = Clock()
         let weather = makeWeather(script: script, clock: clock)
         _ = await weather.getWeather()
@@ -174,18 +174,23 @@ struct WeatherTests {
         clock.ms = 45 * 60 * 1000
         #expect(await weather.getWeather()?.condition == "Sunny") // stale, but better than nothing
 
-        // The failure did not refresh the timestamp, so every call retries.
-        clock.ms = 46 * 60 * 1000
-        _ = await weather.getWeather()
+        // Within the back-off window no new fetch is attempted.
+        clock.ms = 49 * 60 * 1000
+        #expect(await weather.getWeather()?.condition == "Sunny")
+        #expect(script.calls.count == 2)
+
+        // After it, fetch again.
+        clock.ms = 50 * 60 * 1000
+        #expect(await weather.getWeather()?.condition == "Rain")
         #expect(script.calls.count == 3)
     }
 
-    @Test func aFailureWithNothingCachedIsNil() async {
+    @Test func aFailureWithNothingCachedIsNilAndBacksOff() async {
         let script = FetchScript([.failure(PlatformError("offline"))])
         let weather = makeWeather(script: script)
         #expect(await weather.getWeather() == nil)
         #expect(await weather.getWeather() == nil)
-        #expect(script.calls.count == 2)
+        #expect(script.calls.count == 1)
     }
 
     @Test func recoveryAfterAFailureCachesAgain() async {
@@ -193,15 +198,14 @@ struct WeatherTests {
         let clock = Clock()
         let weather = makeWeather(script: script, clock: clock)
         #expect(await weather.getWeather() == nil)
+        clock.ms = 5 * 60 * 1000
         #expect(await weather.getWeather()?.condition == "Fog")
-        clock.ms = 60_000
+        clock.ms = 6 * 60 * 1000
         #expect(await weather.getWeather()?.condition == "Fog")
         #expect(script.calls.count == 2)
     }
 
-    @Test func theLocationIsReadOnEveryCallButTheCacheIgnoresIt() async {
-        // Ported as-is: the cache is not keyed by location, so a changed
-        // location keeps serving the old place's weather until the TTL passes.
+    @Test func aChangedLocationDropsTheCache() async {
         let script = FetchScript([.success(info("Sunny")), .success(info("Snow"))])
         let clock = Clock()
         let location = LocationBox()
@@ -209,10 +213,6 @@ struct WeatherTests {
 
         _ = await weather.getWeather()
         location.value = "Bergen"
-        #expect(await weather.getWeather()?.condition == "Sunny")
-        #expect(script.calls == ["Oslo"])
-
-        clock.ms = 31 * 60 * 1000
         #expect(await weather.getWeather()?.condition == "Snow")
         #expect(script.calls == ["Oslo", "Bergen"])
     }

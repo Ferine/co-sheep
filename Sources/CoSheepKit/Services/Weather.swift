@@ -53,9 +53,15 @@ final class Weather {
     private let fetch: @Sendable (String) async throws -> WeatherInfo
     private let now: () -> Double
 
-    // ex-`WeatherCache`. The cache is not keyed by location (ported as-is).
+    // ex-`WeatherCache`, now keyed by location (Rust kept serving the old
+    // place for up to 30 min after a Settings change) and with a failure
+    // back-off (Rust re-fetched — up to a 10s wait — on every call while
+    // wttr.in was down).
     private var cachedInfo: WeatherInfo?
     private var cachedAtMs: Double?
+    private var cachedLocation: String?
+    private var failedAtMs: Double?
+    static let failureBackoffSeconds = 5.0 * 60.0
 
     /// - Parameters:
     ///   - fetch: the network call. Injected in tests.
@@ -76,20 +82,33 @@ final class Weather {
     func getWeather() async -> WeatherInfo? {
         let loc = location()
         if loc.isEmpty { return nil }
+        if cachedLocation != loc {
+            cachedLocation = loc
+            cachedInfo = nil
+            cachedAtMs = nil
+            failedAtMs = nil
+        }
 
         // Check cache
         if let info = cachedInfo, let at = cachedAtMs, (now() - at) / 1000 < Self.cacheTTLSeconds {
             return info
         }
+        // Recent failure: don't hammer (or wait on) wttr.in again yet.
+        if let failed = failedAtMs, (now() - failed) / 1000 < Self.failureBackoffSeconds {
+            return cachedInfo
+        }
 
         // Fetch fresh
         do {
             let info = try await fetch(loc)
+            guard cachedLocation == loc else { return info } // location changed mid-fetch
             cachedInfo = info
             cachedAtMs = now()
+            failedAtMs = nil
             return info
         } catch {
             Log.info("weather", "error: Weather fetch failed: \(error)")
+            if cachedLocation == loc { failedAtMs = now() }
             // Return stale cache on error
             return cachedInfo
         }

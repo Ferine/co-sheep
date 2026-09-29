@@ -99,8 +99,14 @@ final class AppController {
         appWatch.start()
 
         // MCP companion server — Claude Code drives the sheep over loopback.
-        let cfg = Config.loadConfig() ?? SheepConfig()
-        if cfg.mcpEnabled {
+        // A missing config means defaults (as Rust). A config that exists but
+        // won't parse might hold an auth token — don't fail open without it.
+        let configExists = FileManager.default.fileExists(atPath: Paths.config.path)
+        let cfg = Config.loadConfig() ?? (configExists ? nil : SheepConfig())
+        if cfg == nil {
+            Log.info("mcp", "error: config.json could not be parsed — MCP server not started")
+        }
+        if let cfg, cfg.mcpEnabled {
             let port = cfg.mcpPort
             let token = cfg.mcpToken
             mcpStartTask = Task { [mcp] in

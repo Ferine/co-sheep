@@ -479,6 +479,20 @@ extension BrainTests {
             }
         }
 
+        @Test func anUnparseableConfigDoesNotStartMCPWithoutItsToken() async throws {
+            try await withBrainRoot { root in
+                try JSONFile.writeData(Data("{ not json".utf8), to: Paths.config)
+                let rig = ControllerRig(root: root)
+
+                rig.controller.start()
+                defer { rig.controller.stop() }
+
+                #expect(rig.controller.mcpStartTask == nil)
+                #expect(!rig.mcp.isRunning)
+                #expect(rig.controller.isRunning)
+            }
+        }
+
         @Test func anMCPStartFailureIsLoggedAndTheAppKeepsGoing() async throws {
             try await withBrainRoot { root in
                 try Config.updateConfig { $0.mcpEnabled = true; $0.mcpPort = 0 }
