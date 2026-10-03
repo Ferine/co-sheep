@@ -723,3 +723,56 @@ struct SheepDrawingTests {
         #expect(order == ["overlay", "seasonal"])
     }
 }
+
+@Suite("no hovering in gravity-free states")
+struct NoHoverTests {
+    @Test func aSheepPutInSitMidAirFallsInsteadOfHovering() {
+        let sheep = Sheep(1512, 982)
+        settle(sheep)
+        let ground = sheep.y
+        // What a group-activity poke or an early cancel does to an airborne sheep
+        sheep.y = ground - 300
+        sheep.state = .sit
+        sheep.stateDuration = 5000
+        sheep.update(16)
+        #expect(sheep.state == .parachute)
+        settle(sheep)
+        #expect(sheep.y == ground)
+    }
+
+    @Test func pettingIsRefusedWhileFallingOrStacked() {
+        let sheep = Sheep(1512, 982)
+        sheep.state = .fall
+        sheep.startPetting()
+        #expect(sheep.state == .fall)
+        sheep.state = .stacked
+        sheep.startPetting()
+        #expect(sheep.state == .stacked)
+    }
+
+    @Test func zoomingOffAWindowEdgeFalls() {
+        let sheep = Sheep(1512, 982)
+        let window = WindowPlatform(x: 400, y: 400, w: 300, h: 500)
+        sheep.platforms = [window]
+        sheep.currentPlatform = window
+        sheep.state = .idle
+        sheep.y = 400 - sheep.displaySize
+        sheep.x = 600
+        sheep.playAnimation(.zoom)
+        sheep.facingRight = true
+        for _ in 0..<20 { sheep.update(16) }
+        #expect(sheep.currentPlatform == nil)
+        #expect(sheep.state == .parachute)
+    }
+
+    @Test func groupActivitiesLeaveAListeningSheepAlone() {
+        let sheep = Sheep(1512, 982)
+        settle(sheep)
+        sheep.startListening()
+        #expect(!sheep.canBeDirected)
+        sheep.stopListening()
+        #expect(sheep.canBeDirected)
+        sheep.state = .grabbed
+        #expect(!sheep.canBeDirected)
+    }
+}

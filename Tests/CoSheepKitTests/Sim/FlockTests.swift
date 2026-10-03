@@ -2169,7 +2169,10 @@ struct FlockDrawTests {
             let a = sheep(flock, "a")
             a.state = .idleCampfire
             a.stateDuration = 1e12
-            a.y = a.groundY - 300 // up on a window
+            let window = WindowPlatform(x: a.x - 50, y: a.groundY - 300 + a.displaySize, w: 400, h: 300)
+            flock.setWindowPlatforms([window])
+            a.currentPlatform = window
+            a.y = window.y - a.displaySize // up on a window
             world.autoHideMs = nil
             world.step(flock)
             let keys = frame(flock).groups.map(\.key)

@@ -479,8 +479,8 @@ extension BrainTests {
             }
         }
 
-        @Test func anUnparseableConfigDoesNotStartMCPWithoutItsToken() async throws {
-            try await withBrainRoot { root in
+        @Test func anUnparseableConfigDoesNotStartMCPWithoutItsToken() throws {
+            try withBrainRoot { root in
                 try JSONFile.writeData(Data("{ not json".utf8), to: Paths.config)
                 let rig = ControllerRig(root: root)
 

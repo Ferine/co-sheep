@@ -158,8 +158,10 @@ final class VisionPipeline {
                     let msg = Self.describe(error)
                     Log.info("vision", "error: pipeline: \(msg)")
 
-                    // Surface capture/permission errors to the user
-                    if msg.contains("screen") || msg.contains("capture") || msg.contains("permission") {
+                    // Surface capture/permission errors to the user. A VisionError is
+                    // a model-output parse failure whose message quotes the model's
+                    // raw reply, which may well mention "the screen".
+                    if Self.isCaptureError(error, msg) {
                         events.sheepCommentary.emit(CommentaryEvent(text: Self.SCREEN_ERROR_LINE, animation: nil))
                     }
                 }
@@ -555,6 +557,8 @@ Let their history color the exchange subtly — a callback, a grudge, warmth. Do
                 switch next {
                 case "n": out.append("\n")
                 case "t": out.append("\t")
+                case "r": out.append("\r")
+                case "u": if let s = Self.unicodeEscape(&it) { out.append(s) }
                 default: out.append(next)
                 }
             default:
@@ -592,7 +596,27 @@ Let their history color the exchange subtly — a callback, a grudge, warmth. Do
         }
     }
 
+    /// The scalar of a JSON `\uXXXX` escape (the `\u` already consumed),
+    /// joining a `\uD83D\uDE00` surrogate pair. nil when malformed/truncated.
+    nonisolated static func unicodeEscape(_ it: inout some IteratorProtocol<Unicode.Scalar>) -> Unicode.Scalar? {
+        func hex4() -> UInt32? {
+            var hex = String.UnicodeScalarView()
+            while hex.count < 4, let h = it.next() { hex.append(h) }
+            return hex.count == 4 ? UInt32(String(hex), radix: 16) : nil
+        }
+        guard let code = hex4() else { return nil }
+        guard (0xD800..<0xDC00).contains(code) else { return Unicode.Scalar(code) }
+        guard it.next() == "\\", it.next() == "u", let low = hex4(), (0xDC00..<0xE000).contains(low) else { return nil }
+        return Unicode.Scalar(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00))
+    }
+
     // MARK: - Errors
+
+    /// Whether a pipeline error means we couldn't look at the screen.
+    nonisolated static func isCaptureError(_ error: any Error, _ msg: String) -> Bool {
+        if error is VisionError { return false }
+        return msg.contains("screen") || msg.contains("capture") || msg.contains("permission")
+    }
 
     /// The Rust `e.to_string()`: our own error types carry their message;
     /// system errors (ScreenCaptureKit, URLSession, ...) use their localized text.

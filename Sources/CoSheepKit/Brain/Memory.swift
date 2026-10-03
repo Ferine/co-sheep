@@ -410,6 +410,8 @@ enum Memory {
     /// If new, creates it.
     static func saveOpinion(topic rawTopic: String, opinion opinionText: String, category: String) throws {
         let topic = canonicalizeTopic(rawTopic)
+        // A blank topic would become a "[]" opinion that ranks into every prompt
+        guard !topic.isEmpty else { return }
         var brain = loadBrain()
         let now = BrainTime.nowStamp()
         let today = BrainTime.today()

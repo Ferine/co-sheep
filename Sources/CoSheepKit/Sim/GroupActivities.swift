@@ -126,6 +126,13 @@ private func poke(_ sheep: Sheep, _ state: SheepState, _ duration: Double) {
     sheep.stateDuration = duration
 }
 
+/// Poke, unless the participant is grabbed, airborne, petted or chatting —
+/// it's left alone and rejoins once it's free again.
+private func direct(_ sheep: Sheep, _ state: SheepState, _ duration: Double) {
+    guard sheep.canBeDirected else { return }
+    poke(sheep, state, duration)
+}
+
 /// Check if enough sheep are calm and near each other to start a group activity
 func canStartGroupActivity(_ sheepList: [(id: String, x: Double, calm: Bool)]) -> [String]? {
     // Need at least 3 calm sheep within 5 display widths of each other
@@ -273,22 +280,22 @@ private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getShee
         for i in 0..<activity.participants.count {
             guard let entry = getSheep(activity.participants[i]) else { continue }
             let sheep = entry.sheep
-            if i == 0 && sheep.state != .idleCampfire {
+            if i == 0 && sheep.state != .idleCampfire && sheep.canBeDirected {
                 sheep.playAnimation(.bounce) // will transition to campfire via bored state
                 // Directly set state for leader
                 poke(sheep, .idleCampfire, activity.duration)
                 sheep.campfireSparks = []
             } else if i > 0 && sheep.state != .sit {
-                poke(sheep, .sit, activity.duration)
+                direct(sheep, .sit, activity.duration)
             }
         }
 
     case .followLeader:
         // Leader walks, others follow
         if let leader = activity.leaderId.flatMap({ getSheep($0) }) {
-            if leader.sheep.state != .walk {
+            if leader.sheep.state != .walk && leader.sheep.canBeDirected {
                 leader.sheep.facingRight = SimRandom.next() > 0.5
-                poke(leader.sheep, .walk, activity.duration)
+                direct(leader.sheep, .walk, activity.duration)
             }
             // Others follow leader
             for id in activity.participants {
@@ -318,7 +325,7 @@ private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getShee
         for id in activity.participants {
             guard let entry = getSheep(id) else { continue }
             if entry.sheep.state != .sit && entry.sheep.state != .idle {
-                poke(entry.sheep, .sit, activity.duration)
+                direct(entry.sheep, .sit, activity.duration)
             }
         }
 
@@ -334,7 +341,7 @@ private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getShee
         for id in activity.participants {
             guard let entry = getSheep(id) else { continue }
             if entry.sheep.state != .sit {
-                poke(entry.sheep, .sit, activity.duration)
+                direct(entry.sheep, .sit, activity.duration)
             }
         }
 
@@ -439,7 +446,7 @@ private func updateEasterEggHunt(_ activity: GroupActivity, _ dt: Double, _ getS
         guard let targetIdx = eggAssignments[id] else {
             // No eggs left to find — sit happily
             if entry.sheep.state != .sit && entry.sheep.state != .idle {
-                poke(entry.sheep, .sit, activity.duration)
+                direct(entry.sheep, .sit, activity.duration)
             }
             continue
         }
@@ -478,7 +485,7 @@ private func updateEasterEggHunt(_ activity: GroupActivity, _ dt: Double, _ getS
         let state = entry.sheep.state
         if state == .idle || state == .sit || state == .idleSleep || state == .idleCampfire ||
             state == .idleCounting || state == .idleEggPainting {
-            poke(entry.sheep, .walk, 15000) // long enough to reach the egg
+            direct(entry.sheep, .walk, 15000) // long enough to reach the egg
         }
     }
 

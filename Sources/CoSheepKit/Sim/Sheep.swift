@@ -34,6 +34,17 @@ final class Sheep {
         .idleHearts, .idleZooming, .idleSighing, .idleEggPainting,
     ]
 
+    /// States whose update never applies gravity. A sheep that ends up in one
+    /// of these with nothing underneath (petted mid-air, poked by a group
+    /// activity, zoomed off a window edge) falls instead of hovering. Timed
+    /// animations (spin, backflip, ...) aren't listed: they snap to the ground
+    /// when they end.
+    static let GROUNDED: [SheepState] = [
+        .idle, .walk, .sit, .sleep, .petting, .zoom,
+        .idleSleep, .idleCampfire, .idleCounting, .idleJudging,
+        .idleHearts, .idleZooming, .idleSighing, .idleEggPainting,
+    ]
+
     // MARK: Properties
 
     let id: String
@@ -128,6 +139,17 @@ final class Sheep {
         return groundY
     }
 
+    private func isOffEdge(of p: WindowPlatform) -> Bool {
+        x < p.x - displaySize * 0.3 || x + displaySize > p.x + p.w + displaySize * 0.3
+    }
+
+    /// Above our ground, or past the edge of the window we're standing on.
+    private var isUnsupported: Bool {
+        if y < effectiveGroundY - 1 { return true }
+        if let p = currentPlatform { return isOffEdge(of: p) }
+        return false
+    }
+
     var displaySize: Double {
         (Self.DISPLAY_SIZE * scaleMultiplier).rounded()
     }
@@ -163,6 +185,12 @@ final class Sheep {
     /// True while the human has this sheep's chat open — pickers must not disturb it.
     var isListening: Bool {
         listening
+    }
+
+    /// Standing on something and not busy with the human (grabbed, petted,
+    /// chatting) — group activities may poke its state.
+    var canBeDirected: Bool {
+        !listening && state != .petting && Self.GROUNDED.contains(state)
     }
 
     /// Park the sheep while the human is chatting — it stops and listens.
@@ -252,7 +280,8 @@ final class Sheep {
 
     /// Start petting — called when cursor hovers over sheep for a while.
     func startPetting() {
-        if state == .grabbed || state == .parachute { return }
+        // Petting has no physics: a falling, bouncing or stacked sheep would hover
+        if !Self.GROUNDED.contains(state) { return }
         if state == .petting { return }
         resetActivity()
         Log.info("sheep", "[\(id)] Being petted!")
@@ -444,6 +473,11 @@ final class Sheep {
             updateStacked()
         }
 
+        // Nothing underneath a gravity-free state: fall rather than hover
+        if Self.GROUNDED.contains(state) && isUnsupported {
+            loseGround()
+        }
+
         // Check platform validity (if standing on a window that moved/closed)
         if let p = currentPlatform, state != .grabbed, state != .parachute,
            state != .fall, state != .trampoline, state != .stampede {
@@ -502,7 +536,7 @@ final class Sheep {
 
         // If on a window platform, check boundaries
         if let p = currentPlatform {
-            if x < p.x - displaySize * 0.3 || x + displaySize > p.x + p.w + displaySize * 0.3 {
+            if isOffEdge(of: p) {
                 // Walked off the edge! Fall with parachute
                 currentPlatform = nil
                 state = .parachute

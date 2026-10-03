@@ -60,6 +60,16 @@ final class InputBubble {
     func hide() {
         view.isHidden = true
         isShown = false
+        releaseKey()
+    }
+
+    /// show() made the full-screen overlay panel key; left that way it keeps
+    /// eating keystrokes after the chat closes. Re-ordering drops key status
+    /// and, the panel being non-activating, hands typing back to the user's app.
+    private func releaseKey() {
+        guard let panel = host?.panel, panel.isKeyWindow else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
     }
 
     func destroy() {

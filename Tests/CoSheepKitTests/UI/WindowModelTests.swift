@@ -362,6 +362,22 @@ extension BrainTests {
             }
         }
 
+        @Test func wardrobeSaveKeepsAnAccessoryGiftedWhileItWasOpen() throws {
+            try withBrainRoot { _ in
+                try seed { $0.accessories = ["halo"] }
+                let m = WardrobeModel()
+                m.reload()
+                m.toggle("crown")
+                m.toggle("halo")
+                // The merchant spectacle gifts one meanwhile
+                try WindowCommands.saveAccessories(["halo", "top_hat"])
+
+                m.save()
+                #expect(WindowCommands.getAccessories() == ["crown", "top_hat"])
+                #expect(m.selected == ["crown", "top_hat"])
+            }
+        }
+
         // MARK: Naming
 
         @Test func namingIgnoresABlankName() {

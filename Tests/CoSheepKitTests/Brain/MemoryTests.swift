@@ -224,6 +224,13 @@ extension BrainTests {
             }
         }
 
+        @Test func saveOpinionIgnoresABlankTopic() throws {
+            try withBrainRoot { _ in
+                try Memory.saveOpinion(topic: "  ", opinion: "whatever", category: "fact")
+                #expect(Memory.loadBrain().opinions.isEmpty)
+            }
+        }
+
         @Test func saveOpinionCreatesThenStrengthens() throws {
             try withBrainRoot(now: localDate(2026, 7, 4, 9, 5)) { _ in
                 try Memory.saveOpinion(topic: "Twitter Usage", opinion: "addicted", category: "habit")

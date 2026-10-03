@@ -184,9 +184,10 @@ extension Sequence {
 enum EasterMemory {
     private static func today() -> String { BrainTime.today() }
 
-    /// `Local::now() - 24h`, formatted (not a calendar-day subtraction).
+    /// The previous calendar day. (Rust used `Local::now() - 24h`, which
+    /// lands two days back or on today across a DST change and broke streaks.)
     private static func yesterday() -> String {
-        BrainTime.format("yyyy-MM-dd", BrainTime.now.addingTimeInterval(-86_400))
+        BrainTime.todayNaive().addingDays(-1).description
     }
 
     private static func defaultStats() -> EasterStats {

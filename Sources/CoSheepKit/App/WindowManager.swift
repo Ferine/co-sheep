@@ -109,7 +109,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
             if kind == .naming {
                 Log.info("app", "Naming window already exists, skipping")
             }
-            entry.model.reload()
+            // Bringing a form forward must not discard what's typed in it
+            if kind.reloadsWhenKey { entry.model.reload() }
             present(entry.window)
             return
         }

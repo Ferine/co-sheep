@@ -114,7 +114,7 @@ extension BrainTests {
             }
         }
 
-        @Test func everyOpenReloadsTheWindowsData() throws {
+        @Test func reopeningAFormKeepsItsEditsAndAFreshWindowReloads() throws {
             try withBrainRoot { _ in
                 try withWindows {
                     var config = SheepConfig()
@@ -125,11 +125,12 @@ extension BrainTests {
                     let model = try #require(manager.model(for: .settings) as? SettingsModel)
                     #expect(model.name == "First")
 
+                    model.name = "Typed"
                     config.name = "Second"
                     try Config.writeConfig(config)
-                    manager.open(.settings) // reuse: brought to the front, reloaded
+                    manager.open(.settings) // reuse: brought to the front, edits kept
                     #expect(manager.model(for: .settings) === model)
-                    #expect(model.name == "Second")
+                    #expect(model.name == "Typed")
 
                     manager.close(.settings)
                     config.name = "Third"

@@ -19,6 +19,8 @@ final class WardrobeModel: WindowModel {
     /// Selected ids in insertion order (the page kept a JS `Set`); ids the
     /// grid doesn't offer are kept so a save doesn't drop them.
     private(set) var selected: [String] = []
+    /// What the config held when the window loaded.
+    private var loaded: [String] = []
     let saved = TimedFlag()
     var errorMessage: String?
 
@@ -46,12 +48,21 @@ final class WardrobeModel: WindowModel {
     func reload() {
         var seen = Set<String>()
         selected = WindowCommands.getAccessories().filter { seen.insert($0).inserted }
+        loaded = selected
         errorMessage = nil
     }
 
     func save() {
+        // Keep anything saved since the window loaded (a merchant's gift) —
+        // the selection is a snapshot and would otherwise silently drop it
+        let known = Set(loaded + selected)
+        var seen = Set<String>()
+        let arrived = WindowCommands.getAccessories().filter { !known.contains($0) && seen.insert($0).inserted }
+        let accessories = selected + arrived
         do {
-            try WindowCommands.saveAccessories(selected)
+            try WindowCommands.saveAccessories(accessories)
+            selected = accessories
+            loaded = accessories
             errorMessage = nil
             saved.raise(for: 2)
         } catch {

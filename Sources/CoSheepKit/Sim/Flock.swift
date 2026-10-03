@@ -1073,6 +1073,8 @@ final class Flock {
             for id in activity.participants {
                 if let entry = getSheepById(id) {
                     entry.sheep.walkTarget = nil
+                    // Don't yank a grabbed, airborne or chatting sheep into idle
+                    guard entry.sheep.canBeDirected else { continue }
                     entry.sheep.state = .idle
                     entry.sheep.stateTimer = 0
                     entry.sheep.stateDuration = 1000 + SimRandom.next() * 2000
@@ -1209,6 +1211,12 @@ final class Flock {
 
                 do {
                     guard let script = try Self.parseFriendChatScript(raw, idA: idA, idB: idB, nameB: nameB) else {
+                        return
+                    }
+                    // Something else may have taken the stage during the await
+                    let calm = [idA, idB].allSatisfy { id in self.getSheepById(id).map { self.isCalm($0.sheep) } ?? false }
+                    if self.activeConversation != nil || self.groupActivity != nil || self.spectacle != nil || !calm {
+                        Log.info("flock", "AI friend conversation dropped: flock is busy")
                         return
                     }
                     self.activeConversation = ActiveConversation(

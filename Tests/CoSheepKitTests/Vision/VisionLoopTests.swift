@@ -245,16 +245,16 @@ extension BrainTests {
             }
         }
 
-        @Test func aClassificationParseErrorEchoingTheWordScreenIsSurfacedToo() async throws {
-            // Ported as-is: the parse error quotes the model's raw reply, and the
-            // loop's substring check cannot tell that "screen" came from the model.
+        @Test func aClassificationParseErrorEchoingTheWordScreenStaysQuiet() async throws {
+            // The parse error quotes the model's raw reply; "screen" coming from
+            // the model is no reason to blame screen recording (Rust did).
             await withBrainRoot { _ in
                 let rig = VisionRig(sleepLimit: 2)
                 rig.model.classification = "Nice screen you have there"
 
                 await rig.pipeline.run()
 
-                #expect(rig.commentary.texts == [VisionPipeline.SCREEN_ERROR_LINE])
+                #expect(rig.commentary.texts.isEmpty)
             }
         }
 

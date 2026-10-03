@@ -125,6 +125,20 @@ struct VisionParsingTests {
         #expect(parse("[1, 2]").event.text == "[1, 2]")
     }
 
+    @Test func salvageDecodesUnicodeEscapesAndSurrogatePairs() {
+        #expect(VisionPipeline.extractTextField(#"{"text": "Hei p\u00e5 deg \ud83d\udc11 der"#) == "Hei på deg 🐑 der…")
+        #expect(VisionPipeline.extractTextField(#"{"text": "line one\r\nline two"}"#) == "line one\r\nline two")
+        // Truncated mid-escape: the stub is dropped, not turned into NUL
+        #expect(VisionPipeline.extractTextField(#"{"text": "Hello there \u00"#) == "Hello there …")
+    }
+
+    @Test func modelOutputMentioningTheScreenIsNotACaptureError() {
+        let parse = VisionError("Failed to parse classification: bad — raw: The screen shows a code editor")
+        #expect(!VisionPipeline.isCaptureError(parse, parse.description))
+        let capture = PlatformError("No monitor found for screen capture")
+        #expect(VisionPipeline.isCaptureError(capture, VisionPipeline.describe(capture)))
+    }
+
     @Test func salvageThresholdIsMoreThanTenCharacters() {
         // Unterminated text needs more than 10 characters to be worth showing.
         #expect(VisionPipeline.extractTextField(#"{"text": "0123456789"#) == nil)
