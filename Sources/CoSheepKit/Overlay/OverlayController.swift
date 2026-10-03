@@ -1,5 +1,25 @@
 import AppKit
 
+/// Tells a click on a lamb from the start of a drag: a press that is
+/// released within 350 ms and under 4 px of movement is a click.
+struct ClickGate: Equatable {
+    static let MAX_MS: Double = 350
+    static let MAX_DISTANCE: Double = 4
+
+    var downX: Double
+    var downY: Double
+    var downMs: Double
+
+    /// Has the pointer travelled far enough that this press is a drag?
+    func becameDrag(atX x: Double, _ y: Double) -> Bool {
+        hypot(x - downX, y - downY) >= Self.MAX_DISTANCE
+    }
+
+    func isClick(upX x: Double, _ y: Double, nowMs: Double) -> Bool {
+        nowMs - downMs < Self.MAX_MS && !becameDrag(atX: x, y)
+    }
+}
+
 /// Ex-main.ts: owns the flock and its managers, drives the frame loop, and
 /// turns mouse / file-drop / backend events into sheep behavior.
 final class OverlayController: OverlayDriver {
@@ -17,6 +37,9 @@ final class OverlayController: OverlayDriver {
     private var dragTarget: Sheep?
     private var dragOffsetX: Double = 0
     private var dragOffsetY: Double = 0
+    /// A press on a lamb doesn't grab it until it moves: if it never does,
+    /// it was a click (focus the lamb's terminal), and the lamb stays put.
+    private var lambPress: ClickGate?
 
     // Petting state
     private var hoverTarget: Sheep?
@@ -73,6 +96,10 @@ final class OverlayController: OverlayDriver {
         gossipManager.start()
         mcpCompanion.start()
         Log.info("app", "MCP companion listening for sheep-session events")
+        flock.herd.start()
+        if ProcessInfo.processInfo.environment["CO_SHEEP_HERD_DEMO"] == "1" {
+            flock.herd.startDemo()
+        }
 
         let events = AppEvents.shared
 
@@ -225,7 +252,11 @@ final class OverlayController: OverlayDriver {
         if let hoverTarget, hoverTarget !== target { hoverTarget.stopPetting() }
         hoverTarget = nil
         hoverTimer = 0
-        target.grab()
+        if flock.herd.lamb(for: target) != nil {
+            lambPress = ClickGate(downX: x, downY: y, downMs: SimClock.perfMs())
+        } else {
+            target.grab()
+        }
         host.view.dragging = true
         NSCursor.closedHand.set()
     }
@@ -233,6 +264,12 @@ final class OverlayController: OverlayDriver {
     func mouseDragged(x: Double, y: Double) {
         if isDragging { NSCursor.closedHand.set() }
         if isDragging, let dragTarget {
+            if let press = lambPress {
+                // Still a potential click: grab only once it's really a drag
+                guard press.becameDrag(atX: x, y) else { return }
+                lambPress = nil
+                dragTarget.grab()
+            }
             dragTarget.x = x - dragOffsetX
             dragTarget.y = y - dragOffsetY
         }
@@ -243,8 +280,15 @@ final class OverlayController: OverlayDriver {
             Log.debug("app", "Release \(target.id)!")
             isDragging = false
 
-            // Check for stacking first
-            if let stackTarget = flock.tryStack(target) {
+            if let press = lambPress {
+                // A press on a lamb that never became a drag: a click
+                lambPress = nil
+                if clickCount == 1, press.isClick(upX: x, y, nowMs: SimClock.perfMs()),
+                   let lamb = flock.herd.lamb(for: target) {
+                    flock.herd.clicked(lamb)
+                }
+            } else if let stackTarget = flock.tryStack(target) {
+                // Check for stacking first
                 target.stackOn(stackTarget)
                 flock.onSheepStacked(target, stackTarget)
             } else {
@@ -271,7 +315,10 @@ final class OverlayController: OverlayDriver {
         bubble.show(quip, duration: 4000)
         let anims: [SheepAnimation] = [.bounce, .spin, .headshake, .vibrate]
         target.playAnimation(anims[SimRandom.int(anims.count)])
-        app.recordInteraction("poked \(target.id)")
+        // Lambs are agent sessions, not friends: nothing about them is remembered
+        if flock.herd.lamb(for: target) == nil {
+            app.recordInteraction("poked \(target.id)")
+        }
     }
 
     func mouseMoved(x: Double, y: Double) {
@@ -282,7 +329,9 @@ final class OverlayController: OverlayDriver {
 
     // Petting: track hover time over any sheep
     private func pettingMove(_ x: Double, _ y: Double) {
-        if let target = flock.hitTest(x, y) {
+        let hit = flock.hitTest(x, y)
+        flock.herd.setHover(hit) // the hover card (nil, or a non-lamb, clears it)
+        if let target = hit {
             if hoverTarget !== target {
                 // Started hovering a new target — release the old one, or it
                 // stays in "petting" forever (that state has no timeout)
@@ -294,11 +343,16 @@ final class OverlayController: OverlayDriver {
                       // No petting the main sheep mid-conversation — it's listening
                       !(target.id == "main" && chatBubble != nil) {
                 target.startPetting()
-                flock.getBubble(target).show("Zzzz... don't stop...", duration: 3000)
-                app.recordInteraction("petted \(target.id)")
-                bus.emit(.sheepPetted(id: target.id))
-                if target.id != "main" {
-                    app.recordFriendPet(target.id)
+                if let lamb = flock.herd.lamb(for: target) {
+                    // Lamb lines; no memory, no friend record, no drama bus event
+                    flock.herd.petted(lamb)
+                } else {
+                    flock.getBubble(target).show("Zzzz... don't stop...", duration: 3000)
+                    app.recordInteraction("petted \(target.id)")
+                    bus.emit(.sheepPetted(id: target.id))
+                    if target.id != "main" {
+                        app.recordFriendPet(target.id)
+                    }
                 }
             }
         } else if let hoverTarget {
@@ -332,7 +386,9 @@ final class OverlayController: OverlayDriver {
         target.resetActivity()
         bubble.show(FileComments.comment(forFileName: url.lastPathComponent), duration: 5000)
         target.playAnimation(.bounce)
-        app.recordInteraction("fed a file to \(target.id)")
+        if flock.herd.lamb(for: target) == nil {
+            app.recordInteraction("fed a file to \(target.id)")
+        }
     }
 
     // MARK: - Debug menu
@@ -352,6 +408,10 @@ final class OverlayController: OverlayDriver {
         } else if cmd == "app-switch" {
             // >1h so gossip fires too
             bus.emit(.appSwitched(AppSwitch(app: "Xcode", previousApp: "Safari", previousDurationMs: 3_700_000)))
+        } else if cmd == "herd:demo" {
+            flock.herd.startDemo()
+        } else if cmd == "herd:clear-demo" {
+            flock.herd.clearDemo()
         }
     }
 

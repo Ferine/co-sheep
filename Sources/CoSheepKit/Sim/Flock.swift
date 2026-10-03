@@ -245,6 +245,11 @@ final class Flock {
 
     let main: Sheep
     let mainBubble: SpeechBubble
+    /// The agent herd: one lamb per Claude Code session. Lambs are physical
+    /// sheep (drag, stack, trampoline, stampede, platforms) but live outside
+    /// every friend system: `friends`, `getCharacterIds`, conversations, group
+    /// activities, spectacles, gossip, drama and memory never see them.
+    let herd: Herd
     private var friends = OrderedMap<FriendEntry>()
     private var screenWidth: Double
     private var screenHeight: Double
@@ -316,12 +321,14 @@ final class Flock {
         weatherEffects = WeatherEffects()
         easterTheme = EasterTheme(screenWidth, screenHeight)
         summerTheme = SummerTheme(screenWidth, screenHeight)
+        herd = Herd(screenWidth, screenHeight)
 
         // Create main sheep
         main = Sheep(screenWidth, screenHeight, "main")
         main.setEasterTheme(easterTheme)
         mainBubble = SpeechBubble(listenToCommentary: true)
         attachSeasonalOverlay(main)
+        herd.configureSheep = { [weak self] sheep in self?.attachSeasonalOverlay(sheep) }
 
         // Wire AI commentary animations to main sheep
         mainBubble.onAnimation = { [weak self] anim in
@@ -439,8 +446,11 @@ final class Flock {
         }
     }
 
-    /// Hit test all characters, friends first (drawn on top). Returns nil if none hit.
+    /// Hit test all characters, lambs first, then friends (drawn on top).
+    /// Returns nil if none hit.
     func hitTest(_ px: Double, _ py: Double) -> Sheep? {
+        // Lambs are drawn after the friends, so they are on top
+        if let lamb = herd.hitTest(px, py) { return lamb.sheep }
         // Check friends in reverse order (last drawn = on top)
         for entry in friends.values.reversed() {
             if entry.sheep.hitTest(px, py) { return entry.sheep }
@@ -451,12 +461,14 @@ final class Flock {
 
     /// Get the speech bubble for a specific sheep
     func getBubble(_ sheep: Sheep) -> SpeechBubble {
+        if let lamb = herd.lamb(for: sheep) { return lamb.bubble }
         if sheep.id == "main" { return mainBubble }
         return friends[sheep.id]?.bubble ?? mainBubble
     }
 
     /// Get the quip pool for a specific sheep
     func getQuip(_ sheep: Sheep) -> String {
+        if let lamb = herd.lamb(for: sheep) { return lamb.randomQuip() }
         if sheep.id == "main" { return sheep.getRandomQuip() }
         if let entry = friends[sheep.id] {
             return entry.quips[SimRandom.int(entry.quips.count)]
@@ -519,6 +531,7 @@ final class Flock {
         for entry in friends.values {
             entry.sheep.startStampede(mouseX)
         }
+        herd.stampede(mouseX)
 
         // Only queue post-stampede dialogue if someone actually stampeded
         // (everyone could be parachuting/stacked and thus exempt)
@@ -549,6 +562,10 @@ final class Flock {
                 && yDist < target.displaySize * 0.6
         }
 
+        // Lambs are on top of everything, and anything can stack on a lamb
+        for lamb in herd.stackTargets {
+            if check(lamb) { return lamb }
+        }
         for entry in friends.values.reversed() {
             if check(entry.sheep) { return entry.sheep }
         }
@@ -570,7 +587,10 @@ final class Flock {
         }
 
         bottom.playAnimation(.headshake)
-        Memory.recordInteraction("stacked \(top.id) on \(bottom.id)")
+        // Session ids are no business of the journal
+        if herd.lamb(for: top) == nil, herd.lamb(for: bottom) == nil {
+            Memory.recordInteraction("stacked \(top.id) on \(bottom.id)")
+        }
     }
 
     /// Called when a sheep starts trampolining — triggers reactions
@@ -590,8 +610,12 @@ final class Flock {
             )
             count += 1
         }
+        // Calm lambs cheer too, if there's still room for a reaction or two
+        herd.reactToTrampoline(of: sheep, limit: 2 - count)
 
-        Memory.recordInteraction("trampoline by \(sheep.id)")
+        if herd.lamb(for: sheep) == nil {
+            Memory.recordInteraction("trampoline by \(sheep.id)")
+        }
     }
 
     /// Update window platforms and check validity
@@ -600,6 +624,7 @@ final class Flock {
         for entry in friends.values {
             entry.sheep.platforms = platforms
         }
+        herd.setWindowPlatforms(platforms)
     }
 
     /// Get all bounding boxes for cursor detection
@@ -620,6 +645,7 @@ final class Flock {
                 h: entry.sheep.displaySize + pad * 2
             ))
         }
+        bounds.append(contentsOf: herd.bounds)
         return bounds
     }
 
@@ -635,6 +661,7 @@ final class Flock {
             entry.sheep.screenHeight = h
             entry.sheep.reground()
         }
+        herd.updateScreenSize(w, h)
         nightAmbience.updateScreenSize(w, h)
         easterTheme.updateScreenSize(w, h)
         summerTheme.updateScreenSize(w, h)
@@ -685,6 +712,9 @@ final class Flock {
         for entry in friends.values {
             positions.append(SheepPosition(x: entry.sheep.x, y: entry.sheep.y, state: entry.sheep.state))
         }
+        for lamb in herd.lambs {
+            positions.append(SheepPosition(x: lamb.sheep.x, y: lamb.sheep.y, state: lamb.sheep.state))
+        }
         return positions
     }
 
@@ -693,6 +723,8 @@ final class Flock {
         for entry in friends.values {
             entry.sheep.update(dt)
         }
+        // Lambs after the friends (they're drawn on top, too)
+        herd.update(dt)
 
         // Build sheep positions for night ambience
         let positions = sheepPositions()
@@ -852,6 +884,8 @@ final class Flock {
         for (id, entry) in friends.entries {
             ctx.group("sheep:\(id)", anchor: CGPoint(x: entry.sheep.x, y: entry.sheep.y)) { entry.sheep.draw(ctx) }
         }
+        // Lambs on top of everyone
+        herd.draw(ctx)
 
         if let scene = spectacle {
             ctx.group("spectacle") { drawSpectacleScene(scene, ctx, spectacleWorld()) }
@@ -877,6 +911,8 @@ final class Flock {
         for (id, entry) in friends.entries where entry.bubble.visible {
             ctx.group("bubble:\(id)", layer: .overlay, anchor: Self.bubbleAnchor(entry.bubble)) { entry.bubble.draw(ctx) }
         }
+        // Lamb bubbles and the hover card
+        herd.drawOverlay(ctx)
     }
 
     // MARK: Group activities
