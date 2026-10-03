@@ -50,4 +50,8 @@ final class AppEvents {
     let namingComplete = Signal<String>()
     /// ex-"settings-changed": the saved config (personality, modes, break reminders…).
     let settingsChanged = Signal<SheepConfig>()
+    /// Agent herd: one folded hook/transcript/liveness change (HerdStore → lambs).
+    let herd = Signal<HerdChange>()
+    /// Agent herd: "Connect Claude Code" state changed (installer → menu).
+    let herdHooksChanged = Signal<Void>()
 }

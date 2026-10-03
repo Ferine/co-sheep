@@ -62,6 +62,13 @@ final class Sheep {
     var drawOverlay: DrawOverlay?
     var seasonalOverlay: DrawOverlay?
 
+    /// Agent-herd seam: asked first whenever an idle period ends. Return the
+    /// next state + duration to steer the sheep, or nil for the normal
+    /// wander/bored logic. Returning `.leaving` starts the exit trot.
+    var idleOverride: (() -> (state: SheepState, duration: Double)?)?
+    /// Set once a `.leaving` sheep is fully off-screen; the owner removes it.
+    private(set) var hasLeft = false
+
     // Stacking. Weak: Flock owns every sheep, and a strong pair would be a
     // retain cycle.
     weak var stackedOn: Sheep?
@@ -204,6 +211,28 @@ final class Sheep {
         if state == .sit {
             setState(.idle, 1000 + SimRandom.next() * 2000)
         }
+    }
+
+    /// Agent-herd seam: switch straight to `newState` if the sheep is in a calm
+    /// state (`LISTENING_PARKABLE`) and not chatting. Physics states and
+    /// animations play out first; the next idle then consults `idleOverride`.
+    /// Returns whether the switch happened.
+    @discardableResult
+    func redirect(_ newState: SheepState, _ duration: Double) -> Bool {
+        guard !listening, Self.LISTENING_PARKABLE.contains(state) else { return false }
+        if newState == .leaving {
+            startLeaving()
+        } else {
+            setState(newState, duration)
+        }
+        return true
+    }
+
+    /// Trot off the nearest screen edge (agent lambs whose session ended).
+    func startLeaving() {
+        if state == .stacked { unstack() }
+        facingRight = x + displaySize / 2 > screenWidth / 2
+        setState(.leaving, 0)
     }
 
     /// Trigger a named animation. Interrupts idle/walk/sit but not grabbed.
@@ -382,6 +411,7 @@ final class Sheep {
     /// Re-align with the ground after a screen resize — grounded states
     /// never touch y themselves, so they'd float or sink otherwise.
     func reground() {
+        if state == .leaving { return } // allowed off-screen; never pull it back
         x = max(0, min(x, screenWidth - displaySize))
         let airborne: [SheepState] = [.grabbed, .parachute, .fall, .trampoline, .stacked, .bounce, .backflip]
         if airborne.contains(state) { return }
@@ -471,6 +501,8 @@ final class Sheep {
             updateTrampoline(dt)
         case .stacked:
             updateStacked()
+        case .leaving:
+            updateLeaving(dt)
         }
 
         // Nothing underneath a gravity-free state: fall rather than hover
@@ -480,7 +512,7 @@ final class Sheep {
 
         // Check platform validity (if standing on a window that moved/closed)
         if let p = currentPlatform, state != .grabbed, state != .parachute,
-           state != .fall, state != .trampoline, state != .stampede {
+           state != .fall, state != .trampoline, state != .stampede, state != .leaving {
             let found = platforms.contains { wp in
                 abs(wp.x - p.x) < 30 && abs(wp.y - p.y) < 30 && abs(wp.w - p.w) < 30
             }
@@ -606,7 +638,36 @@ final class Sheep {
         }
     }
 
+    /// Brisk trot toward the exit edge. No edge clamp, no platform walk-off
+    /// parachute: it just drops off a window and keeps going.
+    private func updateLeaving(_ dt: Double) {
+        let dir: Double = facingRight ? 1 : -1
+        x += dir * walkSpeed * 2.2 * (dt / 1000)
+
+        if let p = currentPlatform, isOffEdge(of: p) { currentPlatform = nil }
+        if y < effectiveGroundY - 1 {
+            vy += 800 * (dt / 1000)
+            y = min(y + vy * (dt / 1000), effectiveGroundY)
+        } else {
+            y = effectiveGroundY
+            vy = 0
+        }
+
+        if x + displaySize < -displaySize * 0.5 || x > screenWidth + displaySize * 0.5 {
+            hasLeft = true
+        }
+    }
+
     private func transitionFromIdle() {
+        if let next = idleOverride?() {
+            if next.state == .leaving {
+                startLeaving()
+            } else {
+                setState(next.state, next.duration)
+            }
+            return
+        }
+
         if isBored() {
             transitionToBored()
             return
@@ -941,6 +1002,7 @@ final class Sheep {
         case .stampede: "walk"
         case .trampoline: "fall"
         case .stacked: "sit"
+        case .leaving: "walk"
         default: state.rawValue
         }
     }

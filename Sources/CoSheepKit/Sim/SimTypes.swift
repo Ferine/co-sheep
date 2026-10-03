@@ -20,6 +20,8 @@ nonisolated enum SheepState: String, CaseIterable, Codable {
     case idleSighing = "idle_sighing"
     case stampede, trampoline, stacked
     case idleEggPainting = "idle_egg_painting"
+    /// Agent-herd lambs only: trot toward `Sheep.exitDirection`, off-screen.
+    case leaving
 }
 
 nonisolated enum SheepAnimation: String, CaseIterable, Codable {
