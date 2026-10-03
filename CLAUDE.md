@@ -26,7 +26,13 @@ Swift merge) and is the behavioral reference for anything ported.
 - Run: `scripts/run.sh` (debug bundle, logs in the terminal). Use
   `CO_SHEEP_HOME=<scratch copy of ~/.co-sheep>` for experiments so the
   user's real sheep data isn't touched; `CO_SHEEP_SNAPSHOT=/x.png` renders
-  the overlay without Screen Recording permission.
+  the overlay without Screen Recording permission (the display must be awake:
+  a locked screen renders a blank snapshot).
+- Agent herd (`Herd/`, `Sim/Herd.swift`, spec
+  `docs/superpowers/specs/2026-10-03-agent-herd-design.md`):
+  `CO_SHEEP_HERD_DEMO=1` spawns five demo lambs; `CO_SHEEP_CLAUDE_DIR=<scratch>`
+  points the hook installer away from the real `~/.claude`. Never install
+  hooks into the user's real settings from a test or experiment.
 - Concurrency: default MainActor isolation. Pure value types are
   `nonisolated`; heavy work (OCR, image encode, sockets) is `@concurrent`.
 - Drawing goes through `Canvas` (Canvas2D-shaped). Callers wrap entities in

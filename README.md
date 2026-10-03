@@ -58,6 +58,40 @@ The "Friend Relationships" viewer shows an affinity matrix, per-friend stats, an
 - **Right-click** main sheep to chat directly
 - **Capture Moment** — save sheep + speech bubble as PNG to Desktop (tray menu)
 
+## Agent Herd: every Claude Code session is a lamb
+
+eSheep's sheep multiplied; co-sheep's multiply with your agents. Every running
+Claude Code session parachutes in as its own lamb (inspired by
+[pixtuoid](https://github.com/IvanWng97/pixtuoid)'s pixel office, but the
+desktop is the pasture):
+
+- **Working** — the lamb holds the current tool: knitting needles (Edit/Write),
+  a shovel (Bash), a tiny book (Read/Grep), a telescope (web), a whistle
+  (subagents), a clipboard (todos/plans), a tin-can telephone (MCP tools), a
+  thought cloud (thinking), chewing cud (compaction).
+- **Needs you** — a bobbing `?` and a bleat naming what it's waiting on
+  (permission prompts, questions). **Idle** — it naps.
+- **Wool meter** — wool grows with tokens burned (250K / 2M / 16M tiers).
+  `/clear` and session end **shear** it; at the end it trots off-screen.
+- Wool colour comes from the repo, so lambs on the same repo look like one
+  flock. Subagents trail behind as tiny lamblets.
+- **Hover** for title, Σ tokens, tool calls and age. **Click** to bring its
+  terminal to the front. Drag, stack and trampoline them like any sheep.
+- The main sheep **shepherds** the herd: occasional remarks from the on-device
+  model (stuck lambs, long runs, failure streaks), in your language.
+
+Turn it on with **Connect Claude Code…** in the tray menu. That writes a tiny
+hook script to `~/.co-sheep/hooks/` and adds async hooks to
+`~/.claude/settings.json` (after asking, with a backup; it refuses to touch a
+file that isn't valid JSON). The script only POSTs the hook event to
+`127.0.0.1:4917/hook`, prints nothing and always exits 0, so it can never block
+or slow Claude Code. **Disconnect Claude Code** removes exactly what it added.
+Token counts come from reading the session transcript locally. Nothing leaves
+your machine.
+
+Settings → Agent Herd toggles the lambs and the shepherd. Debug → "Herd: Demo
+Flock" shows five fake lambs (`CO_SHEEP_HERD_DEMO=1` does it at launch).
+
 ## MCP: Claude Code narrates through the sheep
 
 co-sheep runs a local MCP server (`127.0.0.1:4917`) while the app is open. Point
