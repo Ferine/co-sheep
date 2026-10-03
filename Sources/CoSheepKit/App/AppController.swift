@@ -66,6 +66,10 @@ final class AppController {
         self.desktopDirectory = desktopDirectory
     }
 
+    /// The on-device model, for overlay-side features that generate text
+    /// (the herd's shepherd commentary).
+    var languageModel: any LanguageModel { model }
+
     // MARK: - Startup (ex-`setup()`, minus windows and menus)
 
     var isRunning: Bool { isStarted }

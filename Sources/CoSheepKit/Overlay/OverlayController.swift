@@ -31,6 +31,8 @@ final class OverlayController: OverlayDriver {
     private let mcpCompanion: McpCompanion
     private let breakReminder = BreakReminder()
     private var personality = "snarky"
+    private var shepherd: Shepherd?
+    private var shepherdEnabled = true
 
     // Drag state
     private var isDragging = false
@@ -96,10 +98,7 @@ final class OverlayController: OverlayDriver {
         gossipManager.start()
         mcpCompanion.start()
         Log.info("app", "MCP companion listening for sheep-session events")
-        flock.herd.start()
-        if ProcessInfo.processInfo.environment["CO_SHEEP_HERD_DEMO"] == "1" {
-            flock.herd.startDemo()
-        }
+        startHerd()
 
         let events = AppEvents.shared
 
@@ -182,8 +181,51 @@ final class OverlayController: OverlayDriver {
         Log.info("app", "Starting animation loop")
     }
 
+    // MARK: - Agent herd
+
+    /// Lambs for Claude Code sessions (fed by HerdStore over AppEvents.herd),
+    /// click-to-focus their terminal, and the main sheep as shepherd.
+    private func startHerd() {
+        let herd = flock.herd
+        herd.focusTerminal = { [weak self] session in self?.focusTerminal(of: session) }
+
+        let shepherd = Shepherd(
+            model: app.languageModel,
+            speak: { [weak self] line in self?.flock.mainBubble.show(line, duration: 6000) },
+            canSpeak: { [weak self] in
+                guard let self else { return false }
+                return !self.flock.mainBubble.visible && self.chatBubble == nil
+            },
+            isEnabled: { [weak self] in self?.shepherdEnabled ?? false })
+        self.shepherd = shepherd
+        herd.onChange = { [weak herd, weak shepherd] change in
+            guard let herd else { return }
+            shepherd?.observe(change, sessions: herd.sessions)
+        }
+        timers.append(SimTimers.every(5000) { [weak herd, weak shepherd] in
+            guard let herd else { return }
+            shepherd?.tick(sessions: herd.sessions)
+        })
+
+        herd.start()
+        Log.info("app", "Herd listening for agent sessions")
+        if ProcessInfo.processInfo.environment["CO_SHEEP_HERD_DEMO"] == "1" {
+            herd.startDemo()
+        }
+    }
+
+    /// Bring the terminal hosting a lamb's session to the front.
+    private func focusTerminal(of session: AgentSession) {
+        let pid = session.terminalPid ?? session.agentPid.flatMap { TerminalFocus.terminalPid(forAgentPid: $0) }
+        if let pid, TerminalFocus.activate(pid: pid) { return }
+        _ = flock.herd.lamb(id: session.id)?.say("Baa? I can't find my terminal.")
+    }
+
     private func applySettings(_ cfg: SheepConfig) {
         personality = cfg.personality.isEmpty ? "snarky" : cfg.personality
+        flock.herd.isEnabled = cfg.herdEnabled
+        flock.herd.maxLambs = cfg.effectiveMaxLambs
+        shepherdEnabled = cfg.shepherdCommentary
         breakReminder.setEnabled(cfg.breakReminders)
         flock.setEasterMode(EasterMode(rawValue: cfg.easterMode) ?? .auto)
         flock.setSummerMode(SummerMode(rawValue: cfg.summerMode) ?? .auto)
