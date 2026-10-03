@@ -66,7 +66,8 @@ nonisolated struct HTTPResponse: Equatable {
             if n == "content-length" || n == "connection" { continue }
             head += "\(h.name): \(h.value)\r\n"
         }
-        head += "Content-Length: \(body.count)\r\n"
+        // A 204 has no body and, per RFC 9110, no Content-Length either.
+        if status != 204 { head += "Content-Length: \(body.count)\r\n" }
         head += "Connection: close\r\n\r\n"
         var out = Data(head.utf8)
         out.append(body)
@@ -78,6 +79,7 @@ nonisolated struct HTTPResponse: Equatable {
         case 100: "Continue"
         case 200: "OK"
         case 202: "Accepted"
+        case 204: "No Content"
         case 400: "Bad Request"
         case 401: "Unauthorized"
         case 403: "Forbidden"
@@ -110,10 +112,13 @@ nonisolated enum HTTPParser {
         case failure(status: Int, reason: String)
     }
 
-    static func parse(_ data: Data) -> Result {
-        let bytes = [UInt8](data)
+    /// `maxBodyBytes` caps the Content-Length this call accepts (413 above it).
+    static func parse(_ data: Data, maxBodyBytes: Int = HTTPParser.maxBodyBytes) -> Result {
+        // Only the head is inspected, so a big body arriving in many chunks isn't
+        // copied again with every chunk.
+        let bytes = [UInt8](data.prefix(maxHeaderBytes + 4))
         guard let headEnd = indexOfHeaderEnd(bytes) else {
-            if bytes.count > maxHeaderBytes {
+            if data.count > maxHeaderBytes {
                 return .failure(status: 431, reason: "Request header too large")
             }
             return .needMore(expectContinue: false)
@@ -172,12 +177,13 @@ nonisolated enum HTTPParser {
         }
 
         let bodyStart = headEnd + 4
-        let available = bytes.count - bodyStart
+        let available = data.count - bodyStart
         if available < contentLength {
             let expect = request.header("expect")?.lowercased() == "100-continue"
             return .needMore(expectContinue: expect)
         }
-        request.body = Data(bytes[bodyStart..<(bodyStart + contentLength)])
+        let bodyBase = data.startIndex + bodyStart
+        request.body = Data(data[bodyBase..<(bodyBase + contentLength)])
         return .request(request)
     }
 
@@ -219,6 +225,7 @@ private nonisolated extension Character {
 
 /// Loopback-only HTTP/1.1 listener. `handler` runs off the main actor, once per
 /// request; hop to the main actor inside it only for main-actor state.
+/// `maxBodyBytes` is the largest request body it accepts (413 above it).
 nonisolated final class HTTPServer: Sendable {
     typealias Handler = @Sendable (HTTPRequest) async -> HTTPResponse
 
@@ -231,10 +238,12 @@ nonisolated final class HTTPServer: Sendable {
     }
 
     private let queue = DispatchQueue(label: "co-sheep.http-server")
+    private let maxBodyBytes: Int
     private let handler: Handler
     private let state = Mutex(State())
 
-    init(handler: @escaping Handler) {
+    init(maxBodyBytes: Int = HTTPParser.maxBodyBytes, handler: @escaping Handler) {
+        self.maxBodyBytes = maxBodyBytes
         self.handler = handler
     }
 
@@ -325,7 +334,7 @@ nonisolated final class HTTPServer: Sendable {
         do {
             var response: HTTPResponse?
             while response == nil {
-                switch HTTPParser.parse(buffer) {
+                switch HTTPParser.parse(buffer, maxBodyBytes: maxBodyBytes) {
                 case .request(let request):
                     watchdog.cancel()
                     response = await handler(request)

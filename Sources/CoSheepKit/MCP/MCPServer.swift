@@ -12,6 +12,8 @@ nonisolated enum MCPAction: Equatable {
     case fact(Fact)
     /// The `say` escape hatch: an exact line, optionally with an animation name.
     case say(text: String, animation: String?)
+    /// A Claude Code hook event POSTed to `/hook` (the agent herd).
+    case hook(HookEvent)
 }
 
 // MARK: - Tool catalogue
@@ -434,9 +436,9 @@ nonisolated enum MCPProtocol {
 
 /// The HTTP-level policy in front of the JSON-RPC handler. Order matches the
 /// Rust stack: the bearer-token layer wraps everything (so a missing token is
-/// 401 even for unknown paths), then routing (`/mcp`), then rmcp's own checks:
-/// Host, method, content type. There is no Origin check (rmcp's
-/// `allowed_origins` was left empty).
+/// 401 even for unknown paths), then routing (`/mcp`, plus `/hook` for the agent
+/// herd), then rmcp's own checks: Host, method, content type. There is no Origin
+/// check (rmcp's `allowed_origins` was left empty).
 nonisolated struct MCPEndpoint: Sendable {
     /// Empty: no token configured, the loopback binding is the only control.
     var token: String
@@ -445,12 +447,16 @@ nonisolated struct MCPEndpoint: Sendable {
     /// rmcp's default `allowed_hosts`. Any port is fine.
     static let allowedHosts = ["localhost", "127.0.0.1", "::1"]
 
+    /// The hook shim sends `$CLAUDE_PID` here (the `claude` process, for liveness).
+    static let hookPidHeader = "X-Co-Sheep-Pid"
+
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
         guard SessionReducer.checkAuth(request.header("authorization"), expected: token) else {
             return HTTPResponse(status: 401)
         }
 
-        guard request.path == "/mcp" || request.path == "/mcp/" else {
+        let isHook = request.path == "/hook" || request.path == "/hook/"
+        guard isHook || request.path == "/mcp" || request.path == "/mcp/" else {
             return HTTPResponse(status: 404)
         }
 
@@ -470,10 +476,39 @@ nonisolated struct MCPEndpoint: Sendable {
             return .text(415, "Unsupported Media Type: Content-Type must be application/json")
         }
 
+        if isHook {
+            return await handleHook(request)
+        }
+
+        // The listener takes bodies up to `MCPServer.maxBodyBytes` for the hooks;
+        // JSON-RPC keeps the stricter default.
+        if request.body.count > HTTPParser.maxBodyBytes {
+            return .text(413, "Content Too Large")
+        }
+
         return await MCPProtocol.handle(
             body: request.body,
             protocolVersionHeader: request.header("mcp-protocol-version"),
             perform: perform)
+    }
+
+    /// `/hook`: one hook event as JSON. Only the fields `HookEvent` keeps
+    /// survive decoding (prompts and tool I/O in the payload are dropped here,
+    /// off the main actor, and never logged). 204 on success, 400 when the body
+    /// isn't a hook event.
+    private func handleHook(_ request: HTTPRequest) async -> HTTPResponse {
+        guard var event = try? JSONDecoder().decode(HookEvent.self, from: request.body) else {
+            return .text(400, "Bad Request: not a hook event")
+        }
+        event.pid = request.header(Self.hookPidHeader).flatMap(Self.parsePid)
+        await perform(.hook(event))
+        return HTTPResponse(status: 204)
+    }
+
+    /// A positive pid from the header; anything else is "unknown".
+    static func parsePid(_ value: String) -> Int32? {
+        guard let pid = Int32(value.trimmingCharacters(in: .whitespaces)), pid > 0 else { return nil }
+        return pid
     }
 
     /// nil when the Host header is acceptable, else the rejection (400 for a
@@ -526,11 +561,16 @@ nonisolated struct MCPEndpoint: Sendable {
 
 /// Owns the listener. `start`/`stop` and every resolved tool call run on the
 /// main actor; socket work and JSON-RPC handling stay off it and only hop here
-/// to touch `SessionStore` and `AppEvents`.
+/// to touch `SessionStore`, `HerdStore` and `AppEvents`.
 final class MCPServer {
     static let shared = MCPServer()
 
+    /// Request bodies up to this size are accepted: a `PostToolUse` hook carries
+    /// the whole tool output.
+    static let maxBodyBytes = 16 * 1024 * 1024
+
     private let store: SessionStore
+    private let herd: HerdStore
     private let events: AppEvents
     private var http: HTTPServer?
 
@@ -539,9 +579,10 @@ final class MCPServer {
 
     var isRunning: Bool { port != nil }
 
-    init(store: SessionStore = .shared, events: AppEvents = .shared) {
+    init(store: SessionStore = .shared, events: AppEvents = .shared, herd: HerdStore = .shared) {
         self.store = store
         self.events = events
+        self.herd = herd
     }
 
     /// ex-`serve`: listens on 127.0.0.1:`port` (0 picks a free port) and returns
@@ -555,7 +596,7 @@ final class MCPServer {
         let endpoint = MCPEndpoint(token: token) { [weak self] action in
             await self?.perform(action)
         }
-        let server = HTTPServer { request in
+        let server = HTTPServer(maxBodyBytes: Self.maxBodyBytes) { request in
             await endpoint.handle(request)
         }
         http = server // claimed before the first suspension, so a second start is refused
@@ -581,11 +622,14 @@ final class MCPServer {
     }
 
     /// Applies a resolved tool call: facts go through the session store (which
-    /// emits `sheep-session`), `say` emits `sheep-commentary` directly.
+    /// emits `sheep-session`), `say` emits `sheep-commentary` directly, and hook
+    /// events go to the herd.
     func perform(_ action: MCPAction) {
         switch action {
         case .fact(let fact):
             store.commit(fact)
+        case .hook(let event):
+            herd.ingest(event)
         case .say(let text, let animation):
             // The overlay only knows the six animations; an unknown name just
             // means no animation, the line is still shown.

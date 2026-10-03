@@ -19,6 +19,7 @@ final class ControllerRig {
     let pipeline: VisionPipeline
     let watch: AppWatch
     let mcp: MCPServer
+    let herd: HerdStore
     let controller: AppController
 
     init(root: URL, weather: Weather? = nil, createDesktop: Bool = true) {
@@ -33,10 +34,11 @@ final class ControllerRig {
             model: model, screen: screen.access, events: events, weather: weather,
             sleep: { _ in try await Task.sleep(for: .seconds(3600)) })
         watch = AppWatch(pollInterval: 3600, events: events, frontmostAppName: { _ in nil })
-        mcp = MCPServer(store: SessionStore(events: events), events: events)
+        herd = HerdStore(events: events)
+        mcp = MCPServer(store: SessionStore(events: events), events: events, herd: herd)
         controller = AppController(
             model: model, screen: screen.access, events: events, weather: weather,
-            vision: pipeline, appWatch: watch, mcpServer: mcp, desktopDirectory: desktop)
+            vision: pipeline, appWatch: watch, mcpServer: mcp, herdStore: herd, desktopDirectory: desktop)
     }
 }
 
@@ -423,9 +425,10 @@ extension BrainTests {
                 #expect(rig.pipeline.isRunning)
                 #expect(rig.controller.reflection?.isRunning == true)
                 #expect(rig.watch.isRunning)
-                // mcp_enabled = false: nothing spawned
+                // mcp_enabled = false: nothing spawned (the herd rides on the MCP listener)
                 #expect(rig.controller.mcpStartTask == nil)
                 #expect(!rig.mcp.isRunning)
+                #expect(!rig.herd.isRunning)
 
                 // idempotent: a second start neither re-requests permission nor restarts anything
                 rig.controller.start()
@@ -473,9 +476,11 @@ extension BrainTests {
 
                 #expect(rig.mcp.isRunning)
                 #expect(rig.mcp.port != nil && rig.mcp.port != 0)
+                #expect(rig.herd.isRunning)
 
                 rig.controller.stop()
                 #expect(!rig.mcp.isRunning)
+                #expect(!rig.herd.isRunning)
             }
         }
 

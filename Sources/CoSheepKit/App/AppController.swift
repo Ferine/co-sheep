@@ -24,6 +24,7 @@ final class AppController {
     private let weather: Weather
     private let appWatch: AppWatch
     private let mcp: MCPServer
+    private let herd: HerdStore
     private let desktopDirectory: URL
 
     private(set) var reflection: ReflectionLoop?
@@ -51,6 +52,7 @@ final class AppController {
         vision: VisionPipeline? = nil,
         appWatch: AppWatch? = nil,
         mcpServer: MCPServer = .shared,
+        herdStore: HerdStore = .shared,
         desktopDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
     ) {
         self.model = model
@@ -60,6 +62,7 @@ final class AppController {
         self.vision = vision ?? VisionPipeline(model: model, screen: screen, events: events, weather: weather)
         self.appWatch = appWatch ?? AppWatch(events: events)
         self.mcp = mcpServer
+        self.herd = herdStore
         self.desktopDirectory = desktopDirectory
     }
 
@@ -107,6 +110,7 @@ final class AppController {
             Log.info("mcp", "error: config.json could not be parsed — MCP server not started")
         }
         if let cfg, cfg.mcpEnabled {
+            herd.start() // the hook shim reaches it through the MCP listener
             let port = cfg.mcpPort
             let token = cfg.mcpToken
             mcpStartTask = Task { [mcp] in
@@ -132,6 +136,7 @@ final class AppController {
         mcpStartTask?.cancel()
         mcpStartTask = nil
         mcp.stop()
+        herd.stop()
         isStarted = false
     }
 
