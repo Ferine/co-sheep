@@ -240,6 +240,12 @@ nonisolated final class HTTPServer: Sendable {
     typealias BodyLimit = @Sendable (HTTPRequest) -> Int
 
     static let maxConnections = 32
+    /// After answering a request early (413 and friends) while the client may
+    /// still be sending its body, keep reading and discarding for at most this
+    /// long / this much, so closing doesn't reset the connection before the
+    /// client has read the response.
+    static let drainTimeout: Duration = .seconds(2)
+    static let drainMaxBytes = 32 * 1024 * 1024
 
     /// A client has this long to deliver a complete request.
     static let readTimeout: Duration = .seconds(30)
@@ -355,6 +361,7 @@ nonisolated final class HTTPServer: Sendable {
 
         var buffer = Data()
         var sentContinue = false
+        var answeredEarly = false
         do {
             var response: HTTPResponse?
             while response == nil {
@@ -364,6 +371,7 @@ nonisolated final class HTTPServer: Sendable {
                     response = await handler(request)
                 case .failure(let status, let reason):
                     response = .text(status, reason)
+                    answeredEarly = true
                 case .needMore(let expectContinue):
                     if expectContinue, !sentContinue {
                         sentContinue = true
@@ -375,6 +383,7 @@ nonisolated final class HTTPServer: Sendable {
             }
             if let response {
                 try await Self.send(response.serialized(), on: connection)
+                if answeredEarly { await Self.drain(connection) }
             }
         } catch {
             Log.debug("mcp", "connection error: \(error)")
@@ -395,6 +404,21 @@ nonisolated final class HTTPServer: Sendable {
                     continuation.resume(returning: Data())
                 }
             }
+        }
+    }
+
+    /// Lingering close: read and drop whatever the peer is still sending,
+    /// until it closes, `drainMaxBytes` have passed, or `drainTimeout` expires.
+    private static func drain(_ connection: NWConnection) async {
+        let deadline = Task {
+            try await Task.sleep(for: drainTimeout)
+            connection.cancel()
+        }
+        defer { deadline.cancel() }
+        var seen = 0
+        while seen < drainMaxBytes {
+            guard let chunk = try? await receive(on: connection), !chunk.isEmpty else { return }
+            seen += chunk.count
         }
     }
 
