@@ -104,6 +104,33 @@ extension BrainTests {
             }
         }
 
+        @Test func saveSettingsWritesTheHerdTogglesWhenGivenAndLeavesThemOtherwise() throws {
+            try withBrainRoot { _ in
+                try seed { $0.herdEnabled = false; $0.shepherdCommentary = false; $0.herdMaxLambs = 5 }
+                let events = Captured(AppEvents.shared.settingsChanged)
+                defer { events.stop() }
+
+                // Without the herd arguments the saved toggles are kept.
+                try WindowCommands.saveSettings(
+                    name: "A", personality: "snarky", intervalSecs: 150, language: "nynorsk",
+                    breakReminders: true, easterMode: "auto", summerMode: "auto", weatherLocation: "")
+                var onDisk = try #require(Config.loadConfig())
+                #expect(!onDisk.herdEnabled)
+                #expect(!onDisk.shepherdCommentary)
+
+                let saved = try WindowCommands.saveSettings(
+                    name: "A", personality: "snarky", intervalSecs: 150, language: "nynorsk",
+                    breakReminders: true, easterMode: "auto", summerMode: "auto", weatherLocation: "",
+                    herdEnabled: true, shepherdCommentary: false)
+                onDisk = try #require(Config.loadConfig())
+                #expect(onDisk == saved)
+                #expect(onDisk.herdEnabled)
+                #expect(!onDisk.shepherdCommentary)
+                #expect(onDisk.herdMaxLambs == 5)
+                #expect(events.values.last == saved)
+            }
+        }
+
         @Test func saveSettingsCreatesTheConfigOnFirstRun() throws {
             try withBrainRoot { _ in
                 #expect(Config.needsOnboarding())

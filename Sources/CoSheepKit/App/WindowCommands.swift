@@ -30,9 +30,10 @@ enum WindowCommands {
         Config.loadConfig() ?? SheepConfig()
     }
 
-    /// `save_settings`: writes the eight settings fields, preserving friends,
-    /// accessories and MCP settings, then emits `settingsChanged` with the
-    /// saved config. Returns the saved config.
+    /// `save_settings`: writes the eight settings fields (plus the agent-herd
+    /// toggles when given), preserving friends, accessories and MCP settings,
+    /// then emits `settingsChanged` with the saved config. Returns the saved
+    /// config.
     @discardableResult
     static func saveSettings(
         name: String,
@@ -42,7 +43,9 @@ enum WindowCommands {
         breakReminders: Bool,
         easterMode: String,
         summerMode: String,
-        weatherLocation: String
+        weatherLocation: String,
+        herdEnabled: Bool? = nil,
+        shepherdCommentary: Bool? = nil
     ) throws -> SheepConfig {
         Log.info(
             "app",
@@ -57,6 +60,8 @@ enum WindowCommands {
             c.easterMode = easterMode
             c.summerMode = summerMode
             c.weatherLocation = weatherLocation
+            if let herdEnabled { c.herdEnabled = herdEnabled }
+            if let shepherdCommentary { c.shepherdCommentary = shepherdCommentary }
         }
         AppEvents.shared.settingsChanged.emit(config)
         return config

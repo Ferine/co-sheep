@@ -56,6 +56,8 @@ final class SettingsModel: WindowModel {
     var easterMode = "auto"
     var summerMode = "auto"
     var breakReminders = true
+    var herdEnabled = true
+    var shepherdCommentary = true
     var errorMessage: String?
     let saved = TimedFlag()
 
@@ -91,6 +93,8 @@ final class SettingsModel: WindowModel {
         easterMode = s.easterMode.isEmpty ? "auto" : s.easterMode
         summerMode = s.summerMode.isEmpty ? "auto" : s.summerMode
         breakReminders = s.breakReminders
+        herdEnabled = s.herdEnabled
+        shepherdCommentary = s.shepherdCommentary
         errorMessage = nil
     }
 
@@ -104,7 +108,9 @@ final class SettingsModel: WindowModel {
                 breakReminders: breakReminders,
                 easterMode: easterMode,
                 summerMode: summerMode,
-                weatherLocation: Self.trimmed(weatherLocation))
+                weatherLocation: Self.trimmed(weatherLocation),
+                herdEnabled: herdEnabled,
+                shepherdCommentary: shepherdCommentary)
             errorMessage = nil
             saved.raise(for: 3)
         } catch {
@@ -206,6 +212,15 @@ struct SettingsView: View {
                     Toggle("Break Reminders", isOn: $model.breakReminders)
                 } footer: {
                     Text("Nudge me to take breaks after 45 min of continuous work.")
+                }
+
+                Section {
+                    Toggle("Show agent lambs", isOn: $model.herdEnabled)
+                    Toggle("Shepherd commentary", isOn: $model.shepherdCommentary)
+                } header: {
+                    Text("Agent Herd")
+                } footer: {
+                    Text("Every Claude Code session becomes a lamb. Connect Claude Code from the co-sheep menu.")
                 }
             }
             .formStyle(.grouped)

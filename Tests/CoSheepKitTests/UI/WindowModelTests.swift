@@ -133,6 +133,31 @@ extension BrainTests {
             }
         }
 
+        @Test func settingsModelLoadsAndSavesTheHerdToggles() throws {
+            try withBrainRoot { _ in
+                let fresh = SettingsModel()
+                fresh.reload()
+                #expect(fresh.herdEnabled)
+                #expect(fresh.shepherdCommentary)
+
+                try seed { $0.herdEnabled = false; $0.shepherdCommentary = true }
+                let m = SettingsModel()
+                m.reload()
+                #expect(!m.herdEnabled)
+                #expect(m.shepherdCommentary)
+
+                let events = Captured(AppEvents.shared.settingsChanged)
+                defer { events.stop() }
+                m.herdEnabled = true
+                m.shepherdCommentary = false
+                m.save()
+                let saved = try #require(Config.loadConfig())
+                #expect(saved.herdEnabled)
+                #expect(!saved.shepherdCommentary)
+                #expect(events.values == [saved])
+            }
+        }
+
         @Test func savingSettingsReportsAWriteFailure() throws {
             try withBrainRoot { _ in
                 try write("{ not json", to: Paths.config)

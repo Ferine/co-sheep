@@ -14,15 +14,23 @@ struct MenuActions {
     var commentNow: () -> Void
     var togglePause: () -> Void
     var debugCapture: () -> Void
-    /// "force-feud" | "spectacle:<type>" | "app-switch"
+    /// "force-feud" | "spectacle:<type>" | "app-switch" | "herd:demo" | "herd:clear-demo"
     var debugCommand: (String) -> Void
+    /// Agent herd: whether Claude Code is connected, for the menu item's title.
+    var claudeHooksStatus: () -> HookInstallStatus
+    /// Agent herd: Connect / Disconnect / Repair (whichever the status calls
+    /// for), confirming with the user first.
+    var toggleClaudeHooks: () -> Void
     var quit: () -> Void
 }
 
 /// Status-bar item + main menu with the same items as the Tauri app.
-final class Menus: NSObject {
+final class Menus: NSObject, NSMenuDelegate {
     private let actions: MenuActions
     private var statusItem: NSStatusItem?
+    /// The "Connect Claude Code…" items (one per menu); titles follow the hook status.
+    private var claudeItems: [NSMenuItem] = []
+    private var stopObservingHooks: (() -> Void)?
 
     // Debug submenu — every item maps to a debug-command.
     static let debugItems: [(title: String, command: String)] = [
@@ -35,6 +43,8 @@ final class Menus: NSObject {
         ("Spectacle: Showdown", "spectacle:showdown"),
         ("Spectacle: Feast", "spectacle:feast"),
         ("Simulate App Switch", "app-switch"),
+        ("Herd: Demo Flock", "herd:demo"),
+        ("Herd: Clear Demo", "herd:clear-demo"),
     ]
 
     init(actions: MenuActions) {
@@ -45,7 +55,36 @@ final class Menus: NSObject {
     func install() {
         installStatusItem()
         installMainMenu()
+        observeHookChanges()
+        refreshClaudeItems()
         Log.info("tray", "System tray created")
+    }
+
+    // MARK: Claude Code connection
+
+    /// The menus also refresh as they open (`menuNeedsUpdate`); this keeps the
+    /// titles right when the hooks change while a menu is showing.
+    func observeHookChanges() {
+        stopObservingHooks?()
+        stopObservingHooks = AppEvents.shared.herdHooksChanged.on { [weak self] in
+            self?.refreshClaudeItems()
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshClaudeItems()
+    }
+
+    func refreshClaudeItems() {
+        let title = ClaudeHooksFlow.menuTitle(for: actions.claudeHooksStatus())
+        for item in claudeItems { item.title = title }
+    }
+
+    /// A "Connect Claude Code…" item that follows the hook status from now on.
+    func claudeItem() -> NSMenuItem {
+        let i = item(ClaudeHooksFlow.menuTitle(for: .notInstalled), #selector(claudeHooks))
+        claudeItems.append(i)
+        return i
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -85,8 +124,11 @@ final class Menus: NSObject {
         m.addItem(item("Capture Moment", #selector(captureMoment)))
         m.addItem(item("Comment Now", #selector(commentNow)))
         m.addItem(item("Pause Commentary", #selector(togglePause)))
+        m.addItem(.separator())
+        m.addItem(claudeItem())
         m.addItem(debugSubmenu())
         m.addItem(item("Quit co-sheep", #selector(quit)))
+        m.delegate = self
         si.menu = m
         statusItem = si
     }
@@ -107,9 +149,12 @@ final class Menus: NSObject {
         app.addItem(item("Comment Now", #selector(commentNow)))
         app.addItem(item("Pause Commentary", #selector(togglePause)))
         app.addItem(item("Debug Capture...", #selector(debugCapture)))
+        app.addItem(.separator())
+        app.addItem(claudeItem())
         app.addItem(debugSubmenu())
         app.addItem(.separator())
         app.addItem(item("Quit co-sheep", #selector(quit), key: "q"))
+        app.delegate = self
         appItem.submenu = app
         main.addItem(appItem)
 
@@ -148,6 +193,7 @@ final class Menus: NSObject {
     @objc private func commentNow() { log("comment_now"); actions.commentNow() }
     @objc private func togglePause() { log("pause"); actions.togglePause() }
     @objc private func debugCapture() { log("debug_capture"); actions.debugCapture() }
+    @objc private func claudeHooks() { log("claude_hooks"); actions.toggleClaudeHooks() }
     @objc private func quit() { log("quit"); actions.quit() }
 
     @objc private func debugItem(_ sender: NSMenuItem) {

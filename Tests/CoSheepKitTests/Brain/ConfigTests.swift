@@ -94,6 +94,7 @@ extension BrainTests {
                     "name", "personality", "interval_secs", "language", "friends", "break_reminders",
                     "easter_mode", "summer_mode", "weather_location", "accessories",
                     "mcp_enabled", "mcp_port", "mcp_token",
+                    "herd_enabled", "herd_max_lambs", "shepherd_commentary",
                 ])
                 #expect(json["interval_secs"] == .number(150))
                 #expect(json["mcp_port"] == .number(4917))
@@ -103,6 +104,67 @@ extension BrainTests {
                 #expect(friend["scale"] == .number(1.1))
                 #expect(friend["accessories"] == .array([.string("hat")]))
             }
+        }
+
+        // MARK: agent herd
+
+        @Test func herdDefaultsAreOnWithEightLambs() {
+            let c = SheepConfig()
+            #expect(c.herdEnabled)
+            #expect(c.herdMaxLambs == 8)
+            #expect(c.shepherdCommentary)
+        }
+
+        @Test func oldConfigsWithoutTheHerdKeysDecodeWithTheDefaults() throws {
+            let json = #"""
+            {"name":"S","personality":"snarky","interval_secs":150,"mcp_enabled":false,"mcp_port":5000}
+            """#
+            let c = try JSONDecoder().decode(SheepConfig.self, from: Data(json.utf8))
+            #expect(c.herdEnabled)
+            #expect(c.herdMaxLambs == 8)
+            #expect(c.shepherdCommentary)
+            #expect(!c.mcpEnabled)
+            #expect(c.mcpPort == 5000)
+        }
+
+        @Test func herdKeysUseTheirSerdeNamesAndRoundTrip() throws {
+            let json = #"""
+            {"name":"S","personality":"snarky","interval_secs":150,
+             "herd_enabled":false,"herd_max_lambs":3,"shepherd_commentary":false}
+            """#
+            let c = try JSONDecoder().decode(SheepConfig.self, from: Data(json.utf8))
+            #expect(!c.herdEnabled)
+            #expect(c.herdMaxLambs == 3)
+            #expect(!c.shepherdCommentary)
+            try withBrainRoot { _ in
+                try Config.writeConfig(c)
+                let o = try #require(try readJSON(Paths.config).objectValue)
+                #expect(o["herd_enabled"] == .bool(false))
+                #expect(o["herd_max_lambs"] == .number(3))
+                #expect(o["shepherd_commentary"] == .bool(false))
+                #expect(Config.loadConfig() == c)
+            }
+        }
+
+        @Test func herdKeysMustDecodeWhenPresent() {
+            // serde: `null` for a non-Option field is an error, not a default.
+            for json in [
+                #"{"name":"S","personality":"p","interval_secs":1,"herd_enabled":null}"#,
+                #"{"name":"S","personality":"p","interval_secs":1,"herd_max_lambs":"many"}"#,
+            ] {
+                #expect(throws: (any Error).self) {
+                    try JSONDecoder().decode(SheepConfig.self, from: Data(json.utf8))
+                }
+            }
+        }
+
+        @Test func lambCapIsClampedToOneThroughSixteenAtTheUseSite() {
+            var c = SheepConfig()
+            for (stored, effective) in [(8, 8), (0, 1), (-5, 1), (1, 1), (16, 16), (17, 16), (999, 16)] {
+                c.herdMaxLambs = stored
+                #expect(c.effectiveMaxLambs == effective, "\(stored)")
+            }
+            #expect(SheepConfig.herdLambRange == 1...16)
         }
 
         @Test func needsOnboardingUntilConfigExists() throws {

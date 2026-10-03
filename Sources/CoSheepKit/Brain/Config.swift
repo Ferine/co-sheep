@@ -70,6 +70,20 @@ nonisolated struct SheepConfig: Codable, Equatable {
     var mcpEnabled: Bool = true
     var mcpPort: UInt16 = 4917
     var mcpToken: String = ""
+    /// Agent herd: every Claude Code session gets a lamb on the desktop.
+    var herdEnabled: Bool = true
+    /// Agent herd: lamb cap (clamped to `herdLambRange` where it is used).
+    var herdMaxLambs: Int = 8
+    /// Agent herd: the main sheep comments on the herd.
+    var shepherdCommentary: Bool = true
+
+    /// The range `herdMaxLambs` is clamped to at the use site.
+    static let herdLambRange = 1...16
+
+    /// `herdMaxLambs` clamped to `herdLambRange`.
+    var effectiveMaxLambs: Int {
+        min(max(herdMaxLambs, Self.herdLambRange.lowerBound), Self.herdLambRange.upperBound)
+    }
 
     enum CodingKeys: String, CodingKey {
         case name, personality
@@ -83,6 +97,9 @@ nonisolated struct SheepConfig: Codable, Equatable {
         case mcpEnabled = "mcp_enabled"
         case mcpPort = "mcp_port"
         case mcpToken = "mcp_token"
+        case herdEnabled = "herd_enabled"
+        case herdMaxLambs = "herd_max_lambs"
+        case shepherdCommentary = "shepherd_commentary"
     }
 
     /// `SheepConfig::default()`.
@@ -103,6 +120,9 @@ nonisolated struct SheepConfig: Codable, Equatable {
         mcpEnabled = try c.decodeSerdeDefault(Bool.self, forKey: .mcpEnabled, default: true)
         mcpPort = try c.decodeSerdeDefault(UInt16.self, forKey: .mcpPort, default: 4917)
         mcpToken = try c.decodeSerdeDefault(String.self, forKey: .mcpToken, default: "")
+        herdEnabled = try c.decodeSerdeDefault(Bool.self, forKey: .herdEnabled, default: true)
+        herdMaxLambs = try c.decodeSerdeDefault(Int.self, forKey: .herdMaxLambs, default: 8)
+        shepherdCommentary = try c.decodeSerdeDefault(Bool.self, forKey: .shepherdCommentary, default: true)
     }
 }
 

@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = AppController()
         self.controller = controller
 
+        let claudeHooks = ClaudeHooksFlow()
         let menus = Menus(actions: MenuActions(
             settings: { WindowManager.shared.open(.settings) },
             memory: { WindowManager.shared.open(.memory) },
@@ -30,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             togglePause: { controller.togglePause() },
             debugCapture: { controller.debugCaptureFromMenu() },
             debugCommand: { AppEvents.shared.debugCommand.emit($0) },
+            claudeHooksStatus: { claudeHooks.status() },
+            toggleClaudeHooks: { claudeHooks.perform() },
             quit: { NSApp.terminate(nil) }
         ))
         menus.install()
