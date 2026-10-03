@@ -68,29 +68,52 @@ Herd (Sim) — owned by Flock
 
 - Route `/hook` on the existing loopback HTTP server (same bearer-token +
   Host checks as `/mcp`). Accepts any JSON object, answers `204` immediately.
-- `HookEvent` (nonisolated Decodable): `session_id`, `transcript_path`, `cwd`,
-  `hook_event_name`, `tool_name?`, `notification_type?`, `message?`,
-  `source?`, `reason?`. Unknown fields ignored. The `X-Co-Sheep-Pid` header
-  ($PPID of the shim) is attached as `pid`.
+  Payloads can be large (`PostToolUse` carries the whole tool output), so the
+  server's body cap is raised to 16 MiB and decoding happens off the main
+  actor. Only the `HookEvent` fields survive; prompts/tool I/O are dropped
+  and never logged.
+- `HookEvent` (lenient Decodable, `Herd/HerdTypes.swift`). The shim sends
+  `$CLAUDE_PID` (documented since v2.1.214; `$PPID` fallback) in the
+  `X-Co-Sheep-Pid` header → `pid`.
+- Command hooks, `"async": true` (zero latency for the agent) except
+  `SessionEnd` (sync, `timeout: 2`: it has a 1.5 s shared budget at
+  teardown). `SessionStart` doesn't support `http` hooks, hence the shim.
 - Registered events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`,
-  `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PreCompact`.
+  `PreToolUse`, `PermissionRequest`, `PermissionDenied`, `PostToolUse`,
+  `PostToolUseFailure`, `Notification`, `Stop`, `StopFailure`,
+  `SubagentStart`, `SubagentStop`, `PreCompact`.
+- Facts from the docs that shape the reducer: `PermissionRequest` fires the
+  moment a prompt appears (`Notification/permission_prompt` only after ~6 s);
+  `Stop` does not fire on a user interrupt and there is no interrupt hook
+  (the transcript tailer spots `[Request interrupted by user`); tool hooks
+  also fire inside subagents (`agent_id` set); `SubagentStop` fires for
+  internal agents with an empty `agent_type` (ignored); `/clear` ends the
+  session (`reason: clear`) and starts a new id (`source: clear`).
 
 ### Reducer (pure)
 
-| event | phase after | notes |
+| event | phase after | beat / notes |
 |---|---|---|
-| SessionStart | idle | create; `source` resume/clear keeps existing lamb |
+| SessionStart | idle | `arrived`; `source: clear` + same agent pid as a session that just ended `clear` → re-key that lamb (`cleared`) |
 | UserPromptSubmit | working(thinking) | |
-| PreToolUse | working(tool) | toolCalls += 1 |
+| PreToolUse | working(tool) | toolCalls += 1; `AskUserQuestion` → waiting |
+| PermissionRequest | waiting(tool) | |
+| Notification permission_prompt / agent_needs_input / elicitation_dialog | waiting | |
+| Notification idle_prompt | idle | |
 | PostToolUse | working(tool) | clears waiting |
-| Notification permission | waiting(tool from message) | |
-| Notification idle | idle | |
-| Stop | idle | `turnsDone += 1` |
-| PreCompact | working(compacting) | |
-| SessionEnd | ended | lamb shears + leaves |
+| PostToolUseFailure | working | `toolFailed` (or `interrupted` → idle when `is_interrupt`) |
+| PermissionDenied | working | `permissionDenied` |
+| Stop | idle | `turnDone`, turnsDone += 1 |
+| StopFailure | idle | `apiError` |
+| SubagentStart/Stop | — | subagents ±1 (non-empty `agent_type`) |
+| PreCompact | working(compacting) | `compacted` |
+| SessionEnd | ended | `departed` |
 
 Every event refreshes `lastEventMs` and fills in missing cwd/transcript/pid.
 Events for an unknown session (app started mid-session) create it.
+Stale-working guard: `working` with no hook event and no transcript growth
+for 10 min → idle. Liveness sweep every 10 s: agent pid gone, or no activity
+for 45 min → ended.
 
 ### Transcript tailer
 
@@ -102,13 +125,15 @@ The first read of an existing file reads it all. A file that shrank resets.
 
 ### Process tree
 
-`ProcessTree` (sysctl `KERN_PROC_PID`): parent pid + name. From the shim's
-pid: the nearest ancestor named `claude`/`node` = agent pid (liveness); the
-nearest ancestor that is a regular `NSRunningApplication` = terminal (focus).
+`ProcessTree` (sysctl `KERN_PROC_PID`): parent pid + name. The shim's pid
+is `$CLAUDE_PID` = agent pid (liveness). Walking up from it, the nearest
+ancestor that is a regular `NSRunningApplication` = terminal (focus).
 
 ### Installer
 
-- Writes `~/.co-sheep/hooks/claude-hook.sh` (0700) with port + optional token.
+- Writes `~/.co-sheep/hooks/claude-hook.sh` (0700) with port + optional
+  token: reads stdin, `curl -s -m 1 --connect-timeout 0.3` to `/hook`,
+  stdout/stderr to /dev/null, always `exit 0`.
 - Merges one matcher group per event into `~/.claude/settings.json`
   (`CO_SHEEP_CLAUDE_DIR` overrides the dir for dev/tests). Idempotent:
   groups whose command is our shim are replaced, nothing else is touched.
