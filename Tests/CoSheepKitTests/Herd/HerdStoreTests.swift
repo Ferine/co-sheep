@@ -97,6 +97,7 @@ struct HerdStoreTests {
             readTranscript: files.reader,
             findTerminal: { pid in calls.terminal.append(pid); return terminal(pid) },
             findRepo: { cwd in calls.repo.append(cwd); return (cwd, (cwd as NSString).lastPathComponent) },
+            acceptsTranscript: { _, _ in true },
             transcriptInterval: transcriptInterval,
             sweepInterval: sweepInterval)
         return Rig(store: store, events: events, clock: clock, files: files, calls: calls, changes: log, dead: dead)

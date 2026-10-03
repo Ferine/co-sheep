@@ -28,6 +28,7 @@ final class HerdStore {
     private let readTranscript: TranscriptReader
     private let findTerminal: (Int32) -> Int32?
     private let findRepo: (String) -> (key: String, name: String)
+    private let acceptsTranscript: (_ path: String, _ sessionId: String) -> Bool
     private let transcriptInterval: Double
     private let sweepInterval: Double
 
@@ -49,6 +50,7 @@ final class HerdStore {
     ///   - readTranscript: reads new transcript bytes off the main actor.
     ///   - findTerminal: the terminal app hosting an agent pid (looked up once per pid).
     ///   - findRepo: the repo identity for a cwd (looked up once per cwd).
+    ///   - acceptsTranscript: whether a payload's `transcript_path` may be tailed.
     init(
         events: AppEvents = .shared,
         now: @escaping () -> Double = { SimClock.nowMs() },
@@ -58,6 +60,9 @@ final class HerdStore {
         },
         findTerminal: @escaping (Int32) -> Int32? = { TerminalFocus.terminalPid(forAgentPid: $0) },
         findRepo: @escaping (String) -> (key: String, name: String) = { RepoIdentity.resolve(cwd: $0) },
+        acceptsTranscript: @escaping (_ path: String, _ sessionId: String) -> Bool = {
+            TranscriptTailer.isTranscriptPath($0, sessionId: $1)
+        },
         transcriptInterval: Double = HerdStore.transcriptIntervalSeconds,
         sweepInterval: Double = HerdStore.sweepIntervalSeconds
     ) {
@@ -67,6 +72,7 @@ final class HerdStore {
         self.readTranscript = readTranscript
         self.findTerminal = findTerminal
         self.findRepo = findRepo
+        self.acceptsTranscript = acceptsTranscript
         self.transcriptInterval = transcriptInterval
         self.sweepInterval = sweepInterval
     }
@@ -207,7 +213,7 @@ final class HerdStore {
             transcriptGrowthMs[s.id] = nil
             return
         }
-        if let path = s.transcriptPath, tails[s.id]?.path != path {
+        if let path = s.transcriptPath, tails[s.id]?.path != path, acceptsTranscript(path, s.id) {
             nextTailSerial += 1
             tails[s.id] = Tail(path: path, serial: nextTailSerial)
         }

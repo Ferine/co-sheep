@@ -233,6 +233,19 @@ nonisolated enum TranscriptTailer {
     /// Most bytes taken from the file per read (the rest comes on the next poll).
     static let maxReadBytes = 50 * 1024 * 1024
 
+    /// Whether a hook payload's `transcript_path` has the shape Claude Code
+    /// gives transcripts, `…/projects/<project>/<session_id>.jsonl`. Anyone who
+    /// can POST to `/hook` chooses that path, so the tailer is never pointed at
+    /// arbitrary files.
+    static func isTranscriptPath(_ raw: String, sessionId: String) -> Bool {
+        guard !sessionId.isEmpty, raw.hasPrefix("/") || raw.hasPrefix("~/") else { return false }
+        let parts = URL(fileURLWithPath: expand(raw)).pathComponents
+        return parts.count >= 4
+            && !parts.contains("..") && !parts.contains(".")
+            && parts[parts.count - 1] == "\(sessionId).jsonl"
+            && parts[parts.count - 3] == "projects"
+    }
+
     /// `~` expansion, like the shell would do for a path from a hook payload.
     static func expand(_ path: String) -> String {
         (path as NSString).expandingTildeInPath
@@ -255,16 +268,21 @@ nonisolated enum TranscriptTailer {
         let expanded = expand(path)
         guard expanded.hasPrefix("/"), expanded.hasSuffix(".jsonl") else { return unchanged }
 
+        // Open first, then check what was opened: a stat-then-open pair could be
+        // raced into a FIFO (which would block) or a device. O_NONBLOCK keeps the
+        // open itself from blocking; O_NOFOLLOW refuses a symlinked leaf.
+        let fd = open(expanded, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return unchanged }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? handle.close() }
         var info = stat()
-        guard stat(expanded, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return unchanged }
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return unchanged }
         let size = Int(info.st_size)
 
         var cursor = cursor
         if size < cursor.offset { cursor.rewind() }
         guard size > cursor.offset else { return TranscriptRead(cursor: cursor, update: nil) }
 
-        guard let handle = FileHandle(forReadingAtPath: expanded) else { return unchanged }
-        defer { try? handle.close() }
         let data: Data
         do {
             try handle.seek(toOffset: UInt64(cursor.offset))

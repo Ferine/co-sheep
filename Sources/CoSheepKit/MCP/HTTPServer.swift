@@ -114,6 +114,13 @@ nonisolated enum HTTPParser {
 
     /// `maxBodyBytes` caps the Content-Length this call accepts (413 above it).
     static func parse(_ data: Data, maxBodyBytes: Int = HTTPParser.maxBodyBytes) -> Result {
+        parse(data, bodyLimit: { _ in maxBodyBytes })
+    }
+
+    /// `bodyLimit` sees the parsed head (no body yet) and returns the largest
+    /// Content-Length to accept for it, so a big allowance can depend on the
+    /// route and credentials instead of applying to every request.
+    static func parse(_ data: Data, bodyLimit: (HTTPRequest) -> Int) -> Result {
         // Only the head is inspected, so a big body arriving in many chunks isn't
         // copied again with every chunk.
         let bytes = [UInt8](data.prefix(maxHeaderBytes + 4))
@@ -172,7 +179,7 @@ nonisolated enum HTTPParser {
             guard first.count <= 9, let n = Int(first) else {
                 return .failure(status: 413, reason: "Content Too Large")
             }
-            if n > maxBodyBytes { return .failure(status: 413, reason: "Content Too Large") }
+            if n > bodyLimit(request) { return .failure(status: 413, reason: "Content Too Large") }
             contentLength = n
         }
 
@@ -225,9 +232,14 @@ private nonisolated extension Character {
 
 /// Loopback-only HTTP/1.1 listener. `handler` runs off the main actor, once per
 /// request; hop to the main actor inside it only for main-actor state.
-/// `maxBodyBytes` is the largest request body it accepts (413 above it).
+/// `bodyLimit` decides, from the request head, the largest body it accepts
+/// (413 above it). At most `maxConnections` are served at once; extra ones
+/// are dropped.
 nonisolated final class HTTPServer: Sendable {
     typealias Handler = @Sendable (HTTPRequest) async -> HTTPResponse
+    typealias BodyLimit = @Sendable (HTTPRequest) -> Int
+
+    static let maxConnections = 32
 
     /// A client has this long to deliver a complete request.
     static let readTimeout: Duration = .seconds(30)
@@ -238,12 +250,16 @@ nonisolated final class HTTPServer: Sendable {
     }
 
     private let queue = DispatchQueue(label: "co-sheep.http-server")
-    private let maxBodyBytes: Int
+    private let bodyLimit: BodyLimit
     private let handler: Handler
     private let state = Mutex(State())
 
-    init(maxBodyBytes: Int = HTTPParser.maxBodyBytes, handler: @escaping Handler) {
-        self.maxBodyBytes = maxBodyBytes
+    convenience init(maxBodyBytes: Int = HTTPParser.maxBodyBytes, handler: @escaping Handler) {
+        self.init(bodyLimit: { _ in maxBodyBytes }, handler: handler)
+    }
+
+    init(bodyLimit: @escaping BodyLimit, handler: @escaping Handler) {
+        self.bodyLimit = bodyLimit
         self.handler = handler
     }
 
@@ -311,7 +327,15 @@ nonisolated final class HTTPServer: Sendable {
 
     private func accept(_ connection: NWConnection) {
         let id = ObjectIdentifier(connection)
-        state.withLock { $0.connections[id] = connection }
+        let admitted = state.withLock { s in
+            guard s.connections.count < Self.maxConnections else { return false }
+            s.connections[id] = connection
+            return true
+        }
+        guard admitted else {
+            connection.cancel()
+            return
+        }
         Task {
             await serve(connection)
             state.withLock { $0.connections[id] = nil }
@@ -334,7 +358,7 @@ nonisolated final class HTTPServer: Sendable {
         do {
             var response: HTTPResponse?
             while response == nil {
-                switch HTTPParser.parse(buffer, maxBodyBytes: maxBodyBytes) {
+                switch HTTPParser.parse(buffer, bodyLimit: bodyLimit) {
                 case .request(let request):
                     watchdog.cancel()
                     response = await handler(request)

@@ -450,6 +450,18 @@ nonisolated struct MCPEndpoint: Sendable {
     /// The hook shim sends `$CLAUDE_PID` here (the `claude` process, for liveness).
     static let hookPidHeader = "X-Co-Sheep-Pid"
 
+    /// The body allowance for a request head: the large hook cap only for an
+    /// authorized POST to `/hook` with a loopback Host, so nothing else (and
+    /// nobody without the token) can make the server buffer 16 MiB.
+    func bodyLimit(for head: HTTPRequest) -> Int {
+        let isHook = head.path == "/hook" || head.path == "/hook/"
+        guard isHook, head.method == "POST",
+              Self.validateHost(head.header("host")) == nil,
+              SessionReducer.checkAuth(head.header("authorization"), expected: token)
+        else { return HTTPParser.maxBodyBytes }
+        return MCPServer.maxBodyBytes
+    }
+
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
         guard SessionReducer.checkAuth(request.header("authorization"), expected: token) else {
             return HTTPResponse(status: 401)
@@ -567,7 +579,7 @@ final class MCPServer {
 
     /// Request bodies up to this size are accepted: a `PostToolUse` hook carries
     /// the whole tool output.
-    static let maxBodyBytes = 16 * 1024 * 1024
+    nonisolated static let maxBodyBytes = 16 * 1024 * 1024
 
     private let store: SessionStore
     private let herd: HerdStore
@@ -596,7 +608,7 @@ final class MCPServer {
         let endpoint = MCPEndpoint(token: token) { [weak self] action in
             await self?.perform(action)
         }
-        let server = HTTPServer(maxBodyBytes: Self.maxBodyBytes) { request in
+        let server = HTTPServer(bodyLimit: { head in endpoint.bodyLimit(for: head) }) { request in
             await endpoint.handle(request)
         }
         http = server // claimed before the first suspension, so a second start is refused
