@@ -102,6 +102,11 @@ final class OverlayController: OverlayDriver {
 
         let events = AppEvents.shared
 
+        // Nobody at the screen: gossip stops crediting app time.
+        unsubscribers.append(events.power.on { [weak self] change in
+            self?.gossipManager.setAway(change.presence.isAway)
+        })
+
         // Bridge the app watcher onto the flock bus.
         unsubscribers.append(events.appSwitched.on { [weak self] s in
             bus.emit(.appSwitched(s))
@@ -290,11 +295,16 @@ final class OverlayController: OverlayDriver {
         dragTarget = target
         dragOffsetX = x - target.x
         dragOffsetY = y - target.y
-        // Clear petting state so hearts don't resume after release
-        if let hoverTarget, hoverTarget !== target { hoverTarget.stopPetting() }
+        // Clear petting state so hearts don't resume after release. A pressed
+        // sheep is grabbed (which ends its petting), but a lamb is only grabbed
+        // once the press turns into a drag: release it here too, or a press
+        // that ends as neither click nor drag leaves it in "petting", which has
+        // no timeout.
+        let isLamb = flock.herd.lamb(for: target) != nil
+        if let hoverTarget, hoverTarget !== target || isLamb { hoverTarget.stopPetting() }
         hoverTarget = nil
         hoverTimer = 0
-        if flock.herd.lamb(for: target) != nil {
+        if isLamb {
             lambPress = ClickGate(downX: x, downY: y, downMs: SimClock.perfMs())
         } else {
             target.grab()
@@ -504,8 +514,7 @@ final class OverlayController: OverlayDriver {
     private func openChat() {
         if chatBubble != nil { return } // already open
 
-        var transcript: [ChatTurn] = []
-        var sendSeq = 0 // a reply only renders if no newer message superseded it
+        var log = ChatSessionLog() // a reply only renders if no newer message superseded it
         var closed = false
         flock.main.startListening()
         // A sheep mid-petting when chat opens would loop hearts forever — end it
@@ -521,34 +530,30 @@ final class OverlayController: OverlayDriver {
             buttonText: "Send",
             onSubmit: { [weak self] text in
                 guard let self, let bubble = bubbleRef, !closed else { return }
-                sendSeq += 1
-                let seq = sendSeq
+                let (seq, turns) = log.send(text)
                 bubble.setLoading(true)
-                let history = capTranscript(transcript).map { HistoryTurn(role: $0.role.rawValue, text: $0.text) }
-                transcript.append(ChatTurn(role: .human, text: text))
+                let history = turns.map { HistoryTurn(role: $0.role.rawValue, text: $0.text) }
                 // Soft timeout: the model call can't be cancelled, so warn and
                 // hand the input back — but keep waiting for the reply.
                 let slowTimer = SimTimers.after(Self.CHAT_SLOW_MS) {
-                    if seq == sendSeq && !closed { bubble.showReply("Zzz...", isError: true) }
+                    if log.isCurrent(seq) && !closed { bubble.showReply("Zzz...", isError: true) }
                 }
                 do {
                     let event = try await self.app.chatWithSheep(message: text, history: history)
                     slowTimer.cancel()
-                    if seq != sendSeq { return } // superseded by a newer message
+                    guard log.answered(seq, event.text) else { return } // superseded by a newer message
                     if closed {
                         // Chat dismissed while thinking — deliver on the floating bubble
                         self.flock.mainBubble.show(event.text, duration: 8000)
                     } else {
-                        transcript.append(ChatTurn(role: .sheep, text: event.text))
                         bubble.showReply(event.text)
                     }
                     self.flock.onChatReply(event.animation)
                 } catch {
                     slowTimer.cancel()
                     Log.info("app", "error: Chat error: \(error)")
-                    if seq != sendSeq || closed { return }
-                    // The model never answered — drop the turn so a retry isn't doubled
-                    if transcript.last?.role == .human { transcript.removeLast() }
+                    // The model never answered — the turn is dropped so a retry isn't doubled
+                    guard log.failed(seq), !closed else { return }
                     let message = (error as? AppControllerError)?.localizedDescription ?? "Baaaa... something broke."
                     bubble.showReply(message, isError: true)
                 }

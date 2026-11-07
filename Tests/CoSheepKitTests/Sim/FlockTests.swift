@@ -1335,11 +1335,27 @@ struct FlockSocialTests {
             world.step(flock, 9000)
             bubble(flock, "good_colleague").hide()
             bubble(flock, "a").hide()
-            // Hour 22 arrives while the 2-minute notification cooldown is running: silence.
+            // Hour 22 arrives while the 2-minute notification cooldown is running: held back...
             world.now = localMs(hour: 22)
             world.step(flock)
             #expect(!bubble(flock, "good_colleague").visible)
             #expect(!bubble(flock, "a").visible)
+
+            // ...and delivered once the cooldown clears, still within the hour.
+            // (The long frame can also fire a periodic quip first, so check that
+            // exactly one friend says a nightfall line rather than which one.)
+            let night = Set(Flock.NIGHT_MESSAGES.values.joined())
+            let nightComments = {
+                ["good_colleague", "a"].filter {
+                    bubble(flock, $0).visible && night.contains(bubble(flock, $0).currentText)
+                }
+            }
+            for id in ["good_colleague", "a"] { park(sheep(flock, id)) }
+            world.step(flock, 121_000)
+            #expect(nightComments().count == 1)
+            for id in ["good_colleague", "a"] { bubble(flock, id).hide() }
+            world.step(flock)
+            #expect(nightComments().isEmpty) // once per hour
 
             // After the cooldown, midnight speaks up again.
             world.step(flock, 121_000)
@@ -1353,6 +1369,21 @@ struct FlockSocialTests {
             world.step(flock)
             #expect(Flock.NIGHT_MESSAGES[.snarky]!.contains(bubble(flock, "good_colleague").currentText))
             #expect(!bubble(flock, "a").visible)
+        }
+    }
+
+    @Test func aNightfallHourWithNobodyFreeWaitsForAFriendWithinTheHour() {
+        withWorld(hour: 20) { world in
+            let flock = makeFlock(friends: [friend("a")])
+            quietStage(flock)
+            world.autoHideMs = nil
+            for id in ["good_colleague", "a"] { bubble(flock, id).show("busy", duration: 600_000) }
+            world.step(flock)
+            #expect(bubble(flock, "good_colleague").currentText == "busy")
+
+            bubble(flock, "a").hide()
+            world.step(flock)
+            #expect(Flock.NIGHT_MESSAGES[.wholesome]!.contains(bubble(flock, "a").currentText))
         }
     }
 
@@ -1410,6 +1441,22 @@ struct FlockSocialTests {
             world.forcedRandom = nil
             #expect(getPersonalityQuips(.snarky).contains(bubble(flock, "a").currentText))
             #expect(!bubble(flock, "good_colleague").visible) // its quip time is 15-45s away
+            let rearm = a.nextQuipTime - world.now
+            #expect(rearm >= 45000 && rearm <= 90000)
+        }
+    }
+
+    @Test func aDueQuipNeverTalksOverALineThatIsShowing() throws {
+        try withWorld { world in
+            let flock = makeFlock(friends: [friend("a", personality: .snarky)])
+            quietStage(flock)
+            world.autoHideMs = nil
+            bubble(flock, "a").show("mid-conversation", duration: 600_000)
+            let a = try #require(flock.getFriendEntry("a"))
+            a.nextQuipTime = world.now - 1
+            world.step(flock, 600)
+            #expect(bubble(flock, "a").currentText == "mid-conversation")
+            // The slot is skipped, not queued: the next quip is re-armed as usual.
             let rearm = a.nextQuipTime - world.now
             #expect(rearm >= 45000 && rearm <= 90000)
         }
@@ -1706,6 +1753,21 @@ struct FlockGroupActivityTests {
             #expect(stats.hunters["good_colleague"]?.sheepName == "Good Colleague")
             #expect(stats.hunters["a"]?.sheepName == "A")
             #expect(stats.hunters.values.reduce(0) { $0 + $1.eggsFoundToday } == stats.eggsFoundToday)
+        }
+    }
+
+    @Test func aSettingsReloadMidHuntKeepsTheHuntAndItsEggs() {
+        withWorld { world in
+            let flock = makeFlock(friends: [friend("a")])
+            cluster(flock, gap: 80)
+            flock.setEasterMode(.on)
+            let activity = createGroupActivity(.easterEggHunt, ["main", "good_colleague", "a"], 720)
+            flock.groupActivity = activity
+            world.run(flock) { activity.phase == .performing && !(activity.eggAssignments ?? [:]).isEmpty }
+            let eggs = flock.easterTheme.getEggPositions()
+            flock.setEasterMode(.on) // the settings fan-out re-applies the mode on every save
+            #expect(flock.groupActivity === activity)
+            #expect(flock.easterTheme.getEggPositions() == eggs)
         }
     }
 

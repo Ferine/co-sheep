@@ -57,11 +57,15 @@ private final class Stage {
     let flock: Flock
     let manager: DramaManager
     private let savedRandom: () -> Double
+    private let savedZone = SimClock.timeZone
     /// Every spectacle the manager asked for.
     private(set) var spectacles: [(type: SpectacleType, pair: (String, String))] = []
 
-    init(friends: [String] = ["a", "b"]) {
+    /// `zone` is what "local" means for the day roll (UTC unless a test needs
+    /// otherwise, so the expectations don't depend on the machine's zone).
+    init(friends: [String] = ["a", "b"], zone: TimeZone = TimeZone(identifier: "UTC")!) {
         savedRandom = SimRandom.source
+        SimClock.timeZone = zone
         let c = clock, d = dice
         SimClock.nowSource = { c.now }
         SimRandom.source = { d.next() }
@@ -88,6 +92,7 @@ private final class Stage {
     func close() {
         manager.stop()
         SimRandom.source = savedRandom
+        SimClock.timeZone = savedZone
     }
 
     var now: Double {
@@ -144,8 +149,6 @@ extension BrainTests {
             #expect(SimISO.timestamp(1_000_000_000_123) == "2001-09-09T01:46:40.123Z")
             #expect(SimISO.timestamp(NOW + 789) == "2026-09-29T12:00:00.789Z")
             #expect(SimISO.timestamp(-1) == "1969-12-31T23:59:59.999Z")
-            #expect(SimISO.day(NOW) == "2026-09-29")
-            #expect(SimISO.day(NOW + 12 * HOUR) == "2026-09-30")
         }
 
         // MARK: persistence (drama.json)
@@ -238,7 +241,7 @@ extension BrainTests {
 
         // MARK: bus and lifecycle
 
-        @Test func pettedEventsCountPerFriendAndRollOverAtUtcMidnight() {
+        @Test func pettedEventsCountPerFriendAndRollOverAtLocalMidnight() {
             withBrainRoot { _ in
                 let s = Stage()
                 defer { s.close() }
@@ -249,6 +252,19 @@ extension BrainTests {
                 #expect(s.manager.state.pettingToday == ["a": 2, "b": 1])
 
                 s.now = NOW + 13 * HOUR // 2026-09-30 01:00Z
+                bus.emit(.sheepPetted(id: "b"))
+                #expect(s.manager.state.pettingToday == ["b": 1])
+                #expect(s.manager.state.pettingDate == "2026-09-30")
+            }
+        }
+
+        @Test func pettingRollsOverAtLocalMidnightNotUtc() {
+            withBrainRoot { _ in
+                let s = Stage(zone: TimeZone(identifier: "Europe/Oslo")!) // UTC+2 in September
+                defer { s.close() }
+                s.manager.start()
+                bus.emit(.sheepPetted(id: "a"))
+                s.now = NOW + 10 * HOUR + 30 * MINUTE // 22:30Z, 00:30 in Oslo
                 bus.emit(.sheepPetted(id: "b"))
                 #expect(s.manager.state.pettingToday == ["b": 1])
                 #expect(s.manager.state.pettingDate == "2026-09-30")
@@ -731,6 +747,28 @@ extension BrainTests {
                 #expect(s.spectacles.isEmpty)
                 let log = try dramaJSON(root)["log"]?.arrayValue
                 #expect(log?.last?["text"] == .string("b & a: showdown ended in a stalemate"))
+            }
+        }
+
+        @Test func aStalemateHoldsOffTheNextShowdownForSixHours() throws {
+            try withBrainRoot { root in
+                let s = Stage()
+                defer { s.close() }
+                try s.seed(root, pairs: [("a|b", .feud, NOW - 25 * HOUR)])
+                s.manager.start()
+                s.manager.resolveShowdown(("a", "b"), false)
+
+                // The feud keeps its `since`, but the showdown roll isn't taken.
+                s.now += 5 * HOUR
+                s.dice.script = Stage.sparks(3) + [0.99, 0.99, 0.0]
+                s.manager.tick()
+                #expect(s.spectacles.isEmpty)
+
+                // Six hours after the stalemate the pair may square off again.
+                s.now += HOUR
+                s.dice.script = Stage.sparks(3) + [0.99, 0.99, 0.0]
+                s.manager.tick()
+                #expect(s.spectacleKeys == ["showdown a|b"])
             }
         }
 

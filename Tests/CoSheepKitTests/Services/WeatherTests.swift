@@ -185,6 +185,25 @@ struct WeatherTests {
         #expect(script.calls.count == 3)
     }
 
+    @Test func aReadingTooOldToStandInIsDroppedWhenTheRefreshFails() async {
+        // Back from a night asleep with the network not up yet: yesterday's
+        // "Sunny" is worse than no weather.
+        let script = FetchScript([.success(info("Sunny")), .failure(PlatformError("offline"))])
+        let clock = Clock()
+        let weather = makeWeather(script: script, clock: clock)
+        _ = await weather.getWeather()
+        clock.ms = 8 * 3600 * 1000
+        #expect(await weather.getWeather() == nil)
+        #expect(script.calls.count == 2)
+    }
+
+    @Test func theDefaultClockKeepsCountingThroughSleep() {
+        // Uptime (`perfMs`) stops while the Mac sleeps; the TTL must not.
+        let a = SimClock.continuousMs()
+        #expect(a > 0)
+        #expect(SimClock.continuousMs() >= a)
+    }
+
     @Test func aFailureWithNothingCachedIsNilAndBacksOff() async {
         let script = FetchScript([.failure(PlatformError("offline"))])
         let weather = makeWeather(script: script)

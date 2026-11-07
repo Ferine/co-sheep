@@ -43,6 +43,10 @@ final class HerdStore {
 
     private var transcriptLoop: Task<Void, Never>?
     private var sweepLoop: Task<Void, Never>?
+    /// Set between `willSleep` and `didWake`. The sweep loop can resume on
+    /// wake before the wake notification is handled, so it waits for it
+    /// rather than judge silence on a clock that just jumped.
+    private var asleepSinceMs: Double?
 
     /// - Parameters:
     ///   - now: epoch milliseconds.
@@ -123,9 +127,28 @@ final class HerdStore {
         sweepLoop = nil
     }
 
+    // MARK: Sleep
+
+    /// The Mac is about to sleep.
+    func willSleep() {
+        if asleepSinceMs == nil { asleepSinceMs = now() }
+    }
+
+    /// The Mac woke: the time asleep doesn't count toward any session's
+    /// silence. A wake without a recorded sleep changes nothing.
+    func didWake() {
+        guard let since = asleepSinceMs else { return }
+        asleepSinceMs = nil
+        let sleptMs = max(0, now() - since)
+        HerdReducer.excludeSleep(&state, sleptMs: sleptMs)
+        for (id, ms) in transcriptGrowthMs { transcriptGrowthMs[id] = ms + sleptMs }
+        Log.info("herd", "awake after \(Int(sleptMs / 60_000)) min: silence clocks skip the sleep")
+    }
+
     /// One liveness pass: dead or silent sessions leave, quiet `working` ones
-    /// go idle, unclaimed `/clear`s depart.
+    /// go idle, unclaimed `/clear`s depart. Skipped while asleep.
     func sweep() {
+        guard asleepSinceMs == nil else { return }
         let growth = transcriptGrowthMs
         let changes = HerdReducer.sweep(
             &state, nowMs: now(), isAlive: isAlive, transcriptActivityMs: { growth[$0] })

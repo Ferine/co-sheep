@@ -114,7 +114,7 @@ final class NightAmbience {
 
     /// Returns 0..1 night intensity based on current hour (via `SimClock`)
     func getNightAlpha() -> Double {
-        let parts = Calendar.current.dateComponents(
+        let parts = SimClock.calendar.dateComponents(
             [.hour, .minute], from: Date(timeIntervalSince1970: SimClock.nowMs() / 1000))
         let h = Double(parts.hour ?? 0) + Double(parts.minute ?? 0) / 60
         return Self.nightAlpha(atHour: h)

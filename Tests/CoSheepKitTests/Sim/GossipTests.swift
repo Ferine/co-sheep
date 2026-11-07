@@ -34,9 +34,13 @@ private final class Stage {
     let flock: Flock
     let gossip: GossipManager
     private let savedRandom: () -> Double
+    private let savedZone = SimClock.timeZone
 
-    init(friends: [String] = ["a", "b"]) {
+    /// `zone` is what "local" means for the day roll (UTC unless a test needs
+    /// otherwise, so the expectations don't depend on the machine's zone).
+    init(friends: [String] = ["a", "b"], zone: TimeZone = TimeZone(identifier: "UTC")!) {
         savedRandom = SimRandom.source
+        SimClock.timeZone = zone
         let c = clock, d = dice
         SimClock.nowSource = { c.now }
         SimRandom.source = { d.next() }
@@ -55,6 +59,7 @@ private final class Stage {
     func close() {
         gossip.stop()
         SimRandom.source = savedRandom
+        SimClock.timeZone = savedZone
     }
 
     var now: Double {
@@ -402,7 +407,7 @@ extension BrainTests {
 
         // MARK: day roll
 
-        @Test func aNewUtcDayResetsTheTalliesAndGossipMilestones() {
+        @Test func aNewLocalDayResetsTheTalliesAndGossipMilestones() {
             withBrainRoot { _ in
                 let s = Stage()
                 defer { s.close() }
@@ -424,6 +429,40 @@ extension BrainTests {
                 // rollDay clears, then the gap since the last credit lands in the new day.
                 #expect(s.gossip.categoryMsToday[.dev] == 59 * MINUTE + 30_000)
                 #expect(s.flock.activeConversation == nil) // under an hour again
+            }
+        }
+
+        @Test func theDayRollsOverAtLocalMidnightNotUtc() {
+            withBrainRoot { _ in
+                let s = Stage(zone: TimeZone(identifier: "Europe/Oslo")!) // UTC+2 in September
+                defer { s.close() }
+                s.gossip.start()
+                #expect(s.gossip.day == "2026-09-29")
+                s.now = NOW + 10 * HOUR + 30 * MINUTE // 22:30Z, 00:30 in Oslo
+                s.gossip.periodicCheck()
+                #expect(s.gossip.day == "2026-09-30")
+            }
+        }
+
+        // MARK: away
+
+        @Test func timeAwayFromTheScreenIsNotCredited() {
+            withBrainRoot { _ in
+                let s = Stage()
+                defer { s.close() }
+                s.gossip.start()
+                s.switchTo("Xcode")
+                s.hideBubbles()
+                s.now += 30 * MINUTE
+                s.gossip.setAway(true) // locked, or the lid closed
+                #expect(s.gossip.categoryMsToday[.dev] == 30 * MINUTE)
+                s.now += 8 * HOUR
+                s.gossip.periodicCheck() // a check while away credits nothing
+                #expect(s.gossip.categoryMsToday[.dev] == 30 * MINUTE)
+                s.gossip.setAway(false)
+                s.now += 10 * MINUTE
+                s.gossip.periodicCheck()
+                #expect(s.gossip.categoryMsToday[.dev] == 40 * MINUTE)
             }
         }
 

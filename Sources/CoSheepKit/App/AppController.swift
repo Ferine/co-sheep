@@ -26,6 +26,11 @@ final class AppController {
     private let mcp: MCPServer
     private let herd: HerdStore
     private let desktopDirectory: URL
+    /// Sleep / wake / lock / screen saver, for the vision loop and the herd.
+    let power: PowerMonitor
+    /// Local day changes, for the once-a-day work nothing else triggers.
+    let dayClock: DayClock
+    private var unsubscribers: [() -> Void] = []
 
     private(set) var reflection: ReflectionLoop?
     private var isStarted = false
@@ -44,6 +49,8 @@ final class AppController {
     ///   - appWatch: override the frontmost-app watcher.
     ///   - desktopDirectory: where `saveMoment` and the debug capture write
     ///     (`~/Desktop`). Tests point it at a temp directory.
+    ///   - power: override the power monitor (tests pass one on private
+    ///     notification centers).
     init(
         model: any LanguageModel = AppleAI(),
         screen: ScreenAccess = .live,
@@ -53,7 +60,9 @@ final class AppController {
         appWatch: AppWatch? = nil,
         mcpServer: MCPServer = .shared,
         herdStore: HerdStore = .shared,
-        desktopDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+        desktopDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop"),
+        power: PowerMonitor? = nil,
+        dayClock: DayClock = DayClock()
     ) {
         self.model = model
         self.screen = screen
@@ -64,6 +73,8 @@ final class AppController {
         self.mcp = mcpServer
         self.herd = herdStore
         self.desktopDirectory = desktopDirectory
+        self.power = power ?? PowerMonitor(events: events)
+        self.dayClock = dayClock
     }
 
     /// The on-device model, for overlay-side features that generate text
@@ -90,6 +101,15 @@ final class AppController {
 
         // ex-`onboarding::get_weather_location()` inside weather.rs
         weather.location = { Config.getWeatherLocation() }
+
+        // Sleep, wake, lock, screen saver; local day changes.
+        unsubscribers.append(events.power.on { [weak self] change in self?.powerChanged(change) })
+        unsubscribers.append(dayClock.dayChanged.on { _ in
+            FriendMemory.decayAffinities() // ran only when the Friends window opened
+        })
+        power.start()
+        dayClock.start()
+        vision.isAway = power.presence.isAway
 
         // Spawn vision loop
         Log.info("app", "Spawning vision loop")
@@ -133,6 +153,10 @@ final class AppController {
 
     /// Stops every loop and the MCP server. `start()` may be called again.
     func stop() {
+        for unsubscribe in unsubscribers { unsubscribe() }
+        unsubscribers.removeAll()
+        power.stop()
+        dayClock.stop()
         vision.stop()
         reflection?.stop()
         reflection = nil
@@ -142,6 +166,23 @@ final class AppController {
         mcp.stop()
         herd.stop()
         isStarted = false
+    }
+
+    // MARK: - Power
+
+    /// Nobody looking: the vision loop rests. Asleep: the herd's silence
+    /// clocks stop. Woken: the day may have changed while the Mac slept.
+    func powerChanged(_ change: PowerChange) {
+        vision.isAway = change.presence.isAway
+        switch change.event {
+        case .willSleep:
+            herd.willSleep()
+        case .didWake:
+            herd.didWake()
+            dayClock.check()
+        default:
+            break
+        }
     }
 
     // MARK: - Pause and manual commentary
@@ -181,21 +222,9 @@ final class AppController {
         model.unavailableReason() == nil
     }
 
-    /// ex-`check_screen_permission`.
-    func checkScreenPermission() -> Bool {
-        screen.hasScreenCapturePermission()
-    }
-
     /// ex-`record_interaction`.
     func recordInteraction(_ interaction: String) {
         Memory.recordInteraction(interaction)
-    }
-
-    /// ex-`record_app_usage`: bump the daily usage tally for an app category
-    /// (feeds the AI's "Today's tallies"). Returns the new count.
-    @discardableResult
-    func recordAppUsage(_ category: String) -> Int {
-        Memory.incrementToday("app:\(category)")
     }
 
     /// ex-`debug_capture`: saves what the sheep sees to the Desktop and says so.
@@ -302,54 +331,15 @@ final class AppController {
         WindowList.getVisibleWindowRects(ownPid: ownPid)
     }
 
-    // MARK: - Living state, friends, easter
-
-    /// ex-`get_living_state`: `.null` when missing or the name is invalid.
-    func getLivingState(_ name: String) -> JSONValue {
-        LivingState.loadState(name)
-    }
-
-    /// ex-`save_living_state`.
-    func saveLivingState(_ name: String, _ value: JSONValue) {
-        LivingState.saveState(name, value)
-    }
+    // MARK: - Friends, easter
 
     /// ex-`record_friend_pet`.
     func recordFriendPet(_ id: String) {
         FriendMemory.recordPet(id)
     }
 
-    /// ex-`get_friend_moods`.
-    func getFriendMoods() -> [String: String] {
-        FriendMemory.getAllMoods()
-    }
-
     /// ex-`get_easter_stats`.
     func getEasterStats() -> EasterStats {
         EasterMemory.getStats()
-    }
-
-    /// ex-`record_easter_hunt`.
-    @discardableResult
-    func recordEasterHunt(_ result: EasterHuntResult) -> EasterStats {
-        EasterMemory.recordHunt(result)
-    }
-
-    // MARK: - Flock bookkeeping (thin lib.rs commands the flock calls)
-
-    /// ex-`record_friend_conversation`.
-    func recordFriendConversation(idA: String, idB: String, topic: String) {
-        FriendMemory.recordConversation(idA, idB, topic)
-    }
-
-    /// ex-`record_group_activity`.
-    func recordGroupActivity(participants: [String], activityType: String) {
-        FriendMemory.recordGroupActivity(participants, activityType)
-    }
-
-    /// ex-`record_spectacle`: friend memories + affinity boost + diary entry.
-    func recordSpectacle(kind: String, participants: [String]) {
-        FriendMemory.recordGroupActivity(participants, kind)
-        try? Memory.appendJournal("*A \(kind) happened on the desktop! The flock is still talking about it.*")
     }
 }

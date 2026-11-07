@@ -259,6 +259,49 @@ extension BrainTests {
             }
         }
 
+        @Test func aSessionEventSpeaksButLeavesARunningGroupActivityAlone() {
+            withBrainRoot { _ in
+                let saved = SimRandom.source
+                defer { SimRandom.source = saved }
+                SimRandom.source = { 0 }
+
+                let events = AppEvents()
+                let flock = makeFlock()
+                let activity = createGroupActivity(.easterEggHunt, ["main", "a", "b"], 700)
+                flock.groupActivity = activity
+                let companion = McpCompanion(flock, events: events)
+                companion.start()
+                defer { companion.stop() }
+
+                events.sheepSession.emit(ev { $0.milestone = "done" })
+                events.sheepSession.emit(ev { $0.kind = "progress"; $0.progress = 0.5 })
+                #expect(flock.groupActivity === activity)
+                #expect(flock.mainBubble.visible)
+                #expect(flock.main.state == .idle) // not pulled out of its role
+            }
+        }
+
+        @Test func aSessionEventCutsOnlyAConversationTheMainSheepSpeaksIn() {
+            withBrainRoot { _ in
+                let events = AppEvents()
+                let flock = makeFlock()
+                let companion = McpCompanion(flock, events: events)
+                companion.start()
+                defer { companion.stop() }
+                let line = ConversationLine(speakerId: "a", text: "hi", duration: 1000, delay: 0, animation: nil)
+
+                flock.activeConversation = Flock.ActiveConversation(
+                    lines: [line], currentIndex: 0, timer: 0, participants: ["a", "b"])
+                events.sheepSession.emit(ev { $0.kind = "begin" })
+                #expect(flock.activeConversation != nil)
+
+                flock.activeConversation = Flock.ActiveConversation(
+                    lines: [line], currentIndex: 0, timer: 0, participants: ["main", "a"])
+                events.sheepSession.emit(ev { $0.kind = "begin" })
+                #expect(flock.activeConversation == nil)
+            }
+        }
+
         @Test func eventsOnAnotherAppEventsHubAreIgnored() {
             withBrainRoot { _ in
                 let mine = AppEvents(), other = AppEvents()

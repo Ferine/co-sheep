@@ -678,15 +678,35 @@ struct EasterEggHuntTests {
         #expect(activity.phase == .dispersing)
     }
 
-    @Test func durationIsNeverCapturedAtHuntEnd() {
-        // Ported as-is: the TS seeds `durationMs: 0` at the gathering →
-        // performing switch, and `0 ?? activity.timer` is 0 (not nullish), so
-        // the "duration captured at hunt end" comment never takes effect.
+    @Test func durationIsCapturedAtHuntEndAndSurvivesTheCelebration() throws {
+        // The summary is seeded with 0 when the hunt starts; the hunt-end
+        // finalize captures the performing time and the celebration's
+        // re-finalize (after `activity.timer` resets) must keep it.
         let easter = theme()
         let stage = Stage([("a", 640), ("b", 700), ("c", 760)])
         let activity = withSeed(3) { createGroupActivity(.easterEggHunt, stage.ids, 700) }
-        #expect(run(activity, stage, easter) { snapToEggs(activity, stage, easter) } > 0)
-        #expect(activity.huntSummary?.durationMs == 0)
+        var performedMs: Double = 0
+        var sawCelebrating = false
+        #expect(run(activity, stage, easter) {
+            snapToEggs(activity, stage, easter)
+            if activity.phase == .performing { performedMs = activity.timer }
+            if activity.phase == .celebrating { sawCelebrating = true }
+        } > 0)
+        #expect(sawCelebrating)
+        let summary = try #require(activity.huntSummary)
+        #expect(summary.durationMs > 0)
+        #expect(summary.durationMs >= performedMs)
+        #expect(summary.durationMs <= performedMs + 16)
+    }
+
+    @Test func aHuntThatTimesOutCapturesItsFullDuration() throws {
+        let easter = theme()
+        let stage = Stage([("a", 640), ("b", 700), ("c", 760)])
+        for id in stage.ids { stage.sheep(id).x = 5000 }
+        let activity = withRandom([0]) { createGroupActivity(.easterEggHunt, stage.ids, 5000) }
+        #expect(run(activity, stage, easter) > 0)
+        let summary = try #require(activity.huntSummary)
+        #expect(summary.durationMs >= activity.duration)
     }
 
     @Test func aParticipantAlreadyAssignedToACollectedEggGetsANewOne() throws {

@@ -127,6 +127,6 @@ final class McpCompanion {
     func render(_ event: SessionEvent) {
         let (text, animation) = pickReaction(event)
         flock.mainBubble.show(text, duration: 6000)
-        flock.onChatReply(animation) // animates main sheep + friend reactions
+        flock.onSessionEvent(animation) // animates main sheep + friend reactions, scene permitting
     }
 }

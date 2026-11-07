@@ -100,10 +100,16 @@ final class GossipManager {
     /// Internal (not private) so tests can inspect the bookkeeping.
     private(set) var categoryMsToday: [AppCategory: Double] = [:]
     private(set) var gossipedHours: [AppCategory: Int] = [:]
-    private(set) var day = SimISO.day(SimClock.nowMs())
+    /// The local day (it was the UTC day in the TS: tallies rolled over at
+    /// 01:00 or 02:00 in Norway).
+    private(set) var day = DayClock.today()
     private(set) var lastInstantBit: Double = 0
     private(set) var currentCategory: AppCategory?
     private(set) var lastCreditAt = SimClock.nowMs()
+    /// Nobody at the screen (asleep, locked, screen saver): time isn't
+    /// credited to the frontmost app. The TS credited a night asleep in front
+    /// of Xcode as eight hours of coding.
+    private(set) var isAway = false
     private var unsubscribeSwitch: (() -> Void)?
     private var checkTimer: TimerToken?
 
@@ -157,17 +163,26 @@ final class GossipManager {
         if let currentCategory { maybeGossip(currentCategory) }
     }
 
+    /// From `PowerMonitor`. Going away credits the time up to now; coming
+    /// back starts a fresh stretch, so the time away is never credited.
+    func setAway(_ away: Bool) {
+        guard away != isAway else { return }
+        rollDay()
+        creditElapsed()
+        isAway = away
+    }
+
     /// Credit elapsed time since the last credit to the current category.
     private func creditElapsed() {
         let now = SimClock.nowMs()
-        if let currentCategory {
+        if let currentCategory, !isAway {
             categoryMsToday[currentCategory, default: 0] += now - lastCreditAt
         }
         lastCreditAt = now
     }
 
     private func rollDay() {
-        let today = SimISO.day(SimClock.nowMs())
+        let today = DayClock.today()
         if today != day {
             day = today
             categoryMsToday = [:]

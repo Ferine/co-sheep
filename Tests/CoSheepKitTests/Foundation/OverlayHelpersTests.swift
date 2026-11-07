@@ -3,6 +3,14 @@ import Testing
 
 @Suite("overlay helpers", .serialized)
 struct OverlayHelpersTests {
+    @Test func theFrameDeltaStartsAt16msAndIsClamped() {
+        #expect(OverlayScene.frameDelta(currentTime: 5, lastTime: 0) == 16)
+        #expect(abs(OverlayScene.frameDelta(currentTime: 10.016, lastTime: 10) - 16) < 1e-6)
+        // Back from display sleep: one bounded step, not minutes in one tick.
+        #expect(OverlayScene.frameDelta(currentTime: 400, lastTime: 10) == OverlayScene.MAX_FRAME_MS)
+        #expect(OverlayScene.frameDelta(currentTime: 9, lastTime: 10) == 0)
+    }
+
     @Test func fileCommentsPickByExtension() {
         let saved = SimRandom.source
         defer { SimRandom.source = saved }

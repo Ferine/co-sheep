@@ -253,6 +253,30 @@ struct SheepStateMachineTests {
         }
     }
 
+    @Test func aZoomBurstCutShortDoesNotLeakIntoTheNextZoomingSpell() {
+        let start = localMs(hour: 12)
+        withSim(now: start, random: [0.1, 0.9]) {
+            let s = idleSheep(id: "friend", x: 700)
+            s.personality = .chaotic
+            SimClock.nowSource = { start + 130_000 }
+            s.update(16)
+            #expect(s.state == .idleZooming)
+            s.update(16) // a burst begins...
+            s.resetActivity() // ...and is cut short
+            #expect(s.state == .idle)
+
+            // The next spell's first burst picks a fresh direction (0.1 → left).
+            SimClock.nowSource = { start + 400_000 }
+            SimRandom.source = { 0.1 }
+            s.facingRight = true
+            s.stateTimer = s.stateDuration // the reset's idle spell is over
+            s.update(16)
+            #expect(s.state == .idleZooming)
+            s.update(16)
+            #expect(!s.facingRight)
+        }
+    }
+
     @Test func resetActivityBreaksOutOfBoredStates() {
         withSim(now: localMs(hour: 12), random: [0.5]) {
             for state in [SheepState.idleSleep, .idleCampfire, .idleCounting, .idleJudging,
@@ -401,6 +425,15 @@ struct SheepStateMachineTests {
             s.update(1000)
             #expect(s.state == .idle)
             #expect(s.x == 1512 - 96)
+        }
+    }
+
+    @Test func aHeldSheepDoesNotJoinAStampede() {
+        withSim(now: localMs(hour: 12), random: [0.5]) {
+            let s = idleSheep(x: 500)
+            s.grab()
+            s.startStampede(400)
+            #expect(s.state == .grabbed)
         }
     }
 

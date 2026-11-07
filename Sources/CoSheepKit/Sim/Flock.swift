@@ -279,7 +279,6 @@ final class Flock {
     private(set) var spectacle: SpectacleScene?
     private var spectacleSchedulerState = SpectacleSchedulerState(lastFiredMs: 0, lastByType: [:])
     private var spectacleCheckTimer: Double = 0
-    private var spectacleStateLoaded = false
     private var goodColleagueTimer: TimerToken?
 
     /// main.ts points this at dramaManager.resolveShowdown.
@@ -289,9 +288,6 @@ final class Flock {
     private var stampedeCooldown: Double = 0
     private var stampedeActive = false
     private var stampedeDialogueTimer: Double = 0
-
-    /// Callback set by main.ts when break reminder fires
-    var onBreakReminderFired: (() -> Void)?
 
     /// Installed by DramaManager: filters group-activity participant lists (drops feuders).
     var participantFilter: ((_ ids: [String]) -> [String])?
@@ -361,7 +357,6 @@ final class Flock {
            let state = try? JSONFile.decoder().decode(SpectacleSchedulerState.self, from: data) {
             spectacleSchedulerState = state
         }
-        spectacleStateLoaded = true
     }
 
     private func saveSpectacleState() {
@@ -673,7 +668,8 @@ final class Flock {
 
     func setEasterMode(_ mode: EasterMode) {
         easterTheme.setModeOverride(mode)
-        if mode == .off && groupActivity?.type == .easterEggHunt {
+        // Off, or auto outside the season: the eggs are gone, so is the hunt.
+        if !easterTheme.active && groupActivity?.type == .easterEggHunt {
             clearGroupActivity(true)
         }
     }
@@ -795,7 +791,7 @@ final class Flock {
                 recordSpectacle(kind: Self.SPECTACLE_KIND_LABELS[scene.type] ?? scene.type.rawValue,
                                 participants: who.filter { $0 != "main" })
             }
-        } else if spectacleStateLoaded {
+        } else {
             spectacleCheckTimer += dt
             if spectacleCheckTimer >= SPECTACLE.CHECK_INTERVAL_MS {
                 spectacleCheckTimer = 0
@@ -849,6 +845,25 @@ final class Flock {
         if let anim { main.playAnimation(anim) }
         triggerFriendReactions("commentary")
         bus.emit(.aiCommentary(animation: anim))
+    }
+
+    /// A Claude session event (MCP `sheep-session`) is on the main bubble.
+    /// These arrive every few seconds while an agent works, so unlike
+    /// commentary they never tear down a scene the main sheep isn't speaking
+    /// in: only a conversation with the main sheep is cut (its next line would
+    /// overwrite this one). Mid-activity or mid-spectacle the main sheep just
+    /// says the line — animating it, or nudging friends to react, would pull
+    /// them out of their roles. (Routing these through `onChatReply` cancelled
+    /// any running group activity, so an egg hunt never survived a busy agent.)
+    func onSessionEvent(_ anim: SheepAnimation?) {
+        if activeConversation?.participants.contains("main") == true {
+            activeConversation = nil
+        }
+        bus.emit(.aiCommentary(animation: anim))
+        if groupActivity != nil || spectacle != nil { return }
+        main.resetActivity()
+        if let anim { main.playAnimation(anim) }
+        if activeConversation == nil { triggerFriendReactions("commentary") }
     }
 
     // MARK: Draw
@@ -1001,21 +1016,24 @@ final class Flock {
             }
         }
 
-        // Nightfall notifications — when hour crosses 20 or 22
+        // Nightfall notifications at 20, 22 and midnight. The hour is only
+        // consumed once a friend actually spoke: a running notification
+        // cooldown (or nobody calm and free) defers it within the hour rather
+        // than losing it. (The TS consumed the hour before checking.)
         let hour = SimClock.hour()
-        if hour != lastNotificationHour && (hour == 20 || hour == 22 || hour == 0) {
-            lastNotificationHour = hour
+        let isNightfallHour = hour == 20 || hour == 22 || hour == 0
+        if isNightfallHour && hour != lastNotificationHour {
             if notificationCooldown <= 0 {
                 for entry in friends.values {
                     if !isCalm(entry.sheep) || entry.bubble.visible { continue }
                     let pool = Self.pick(Self.NIGHT_MESSAGES, entry.personality)
                     entry.bubble.show(Self.pickOne(pool), duration: 5000)
                     notificationCooldown = 120000
+                    lastNotificationHour = hour
                     break
                 }
             }
-        }
-        if hour != lastNotificationHour && lastNotificationHour != -1 {
+        } else if hour != lastNotificationHour && lastNotificationHour != -1 {
             lastNotificationHour = hour
         }
     }
@@ -1340,8 +1358,10 @@ final class Flock {
             if now < entry.nextQuipTime { continue }
 
             let s = entry.sheep.state
-            // Only blurt quips during calm states
-            if s == .idle || s == .walk || s == .sit {
+            // Only blurt quips during calm states, and never over a line that
+            // is already showing (a conversation line, a nightfall comment, a
+            // reaction) — the quip just skips this slot.
+            if (s == .idle || s == .walk || s == .sit) && !entry.bubble.visible {
                 var pool = entry.quips
                 if easterTheme.active && easterTheme.hasRecentHuntBuzz() {
                     pool = Self.EASTER_POST_HUNT_QUIPS

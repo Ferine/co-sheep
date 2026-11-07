@@ -140,6 +140,7 @@ struct HerdReducerTests {
         let after = fold.send("PostToolUse", tool: "AskUserQuestion")[0]
         #expect(after.session.phase == .working)
         #expect(after.session.waitingFor == nil)
+        #expect(after.session.tool == .thinking) // no "asking" placard on a working lamb
     }
 
     @Test func permissionRequestWaitsAndPostToolUseClearsIt() {
