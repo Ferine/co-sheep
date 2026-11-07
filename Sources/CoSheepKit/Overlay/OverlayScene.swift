@@ -61,9 +61,21 @@ final class OverlayScene: SKScene {
         (Double(p.x), Double(size.height - p.y))
     }
 
+    /// The longest step the sim takes in one frame. The TS loop fed the raw
+    /// delta through, so the first frame after display sleep, a lock screen or
+    /// a stall was one step of minutes: sheep teleported, timed states and
+    /// cooldowns elapsed in a single tick.
+    nonisolated static let MAX_FRAME_MS = 100.0
+
+    /// Milliseconds to step for a frame at `currentTime` (seconds) after one at
+    /// `lastTime` (0 = no frame yet: 16ms, like the TS loop's first frame).
+    nonisolated static func frameDelta(currentTime: TimeInterval, lastTime: TimeInterval) -> Double {
+        if lastTime == 0 { return 16 }
+        return min(max(0, (currentTime - lastTime) * 1000), MAX_FRAME_MS)
+    }
+
     override func update(_ currentTime: TimeInterval) {
-        // Same as the TS loop: first frame 16ms, then raw frame delta (unclamped).
-        let dt = lastTime == 0 ? 16 : (currentTime - lastTime) * 1000
+        let dt = Self.frameDelta(currentTime: currentTime, lastTime: lastTime)
         lastTime = currentTime
         driver?.update(dt: dt)
         canvas.beginFrame()

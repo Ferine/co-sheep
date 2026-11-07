@@ -123,6 +123,19 @@ struct EasterThemeTests {
         }
     }
 
+    @Test func reapplyingTheModeKeepsTheMeadowAsItIs() {
+        withSim(now: easterDay2026) {
+            let theme = EasterTheme(1920, 1080)
+            let eggs = theme.getEggPositions()
+            theme.setModeOverride(.auto) // a settings reload
+            theme.setModeOverride(.on) // in season: still active
+            #expect(theme.active)
+            #expect(theme.getEggPositions() == eggs)
+            theme.setModeOverride(.off)
+            #expect(theme.getEggPositions().isEmpty)
+        }
+    }
+
     @Test func modeRawValuesMatchTheReference() {
         #expect(EasterMode.allCases.map(\.rawValue) == ["auto", "on", "off"])
         #expect(EasterMode(rawValue: "on") == .on)

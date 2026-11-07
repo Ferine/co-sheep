@@ -4,15 +4,29 @@ import Foundation
 enum SimClock {
     /// Wall-clock epoch milliseconds (ex-`Date.now()`).
     static var nowSource: () -> Double = { Date().timeIntervalSince1970 * 1000 }
-    /// Monotonic milliseconds (ex-`performance.now()`).
+    /// Monotonic milliseconds (ex-`performance.now()`). System uptime: it
+    /// stops while the Mac sleeps.
     static var perfSource: () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
+    /// Monotonic milliseconds that keep counting while the Mac sleeps
+    /// (`CLOCK_MONOTONIC` on Darwin), for TTLs that must age across sleep.
+    static var continuousSource: () -> Double = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000 }
+    /// The zone "local" means for days and hours. Tests pin it.
+    static var timeZone: TimeZone = .autoupdatingCurrent
 
     static func nowMs() -> Double { nowSource() }
     static func perfMs() -> Double { perfSource() }
+    static func continuousMs() -> Double { continuousSource() }
+
+    /// A Gregorian calendar in `timeZone`.
+    static var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = timeZone
+        return c
+    }
 
     /// Local hour 0–23 (ex-`new Date().getHours()`).
     static func hour() -> Int {
-        Calendar.current.component(.hour, from: Date(timeIntervalSince1970: nowMs() / 1000))
+        calendar.component(.hour, from: Date(timeIntervalSince1970: nowMs() / 1000))
     }
 }
 

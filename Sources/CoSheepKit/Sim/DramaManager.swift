@@ -14,35 +14,12 @@ private let MEDIATION_CHANCE = 0.05    // per tick, per feuding pair
 private let MEDIATION_SUCCESS = 0.6
 private let SHOWDOWN_MS: Double = 24 * 3600 * 1000
 private let SHOWDOWN_CHANCE = 0.10
+/// After a stalemate the feud keeps its `since`, so without a retry delay the
+/// pair would re-roll a showdown every tick until the feud tires out.
+private let SHOWDOWN_RETRY_MS: Double = 6 * 3600 * 1000
 private let AI_NARRATION_CHANCE = 0.3
 private let AI_NARRATION_COOLDOWN_MS: Double = 10 * 60 * 1000
 private let LOG_CAP = 50
-
-/// `new Date().toISOString()` for an epoch-ms value: always UTC, always
-/// `YYYY-MM-DDTHH:MM:SS.mmmZ`, computed with integer math so a millisecond
-/// never rounds away. drama.json (and the gossip day roll) key on it.
-enum SimISO {
-    static func timestamp(_ ms: Double) -> String {
-        let total = ms.isFinite ? Int(max(-8.64e15, min(8.64e15, ms.rounded(.down)))) : 0
-        let msPerDay = 86_400_000
-        var days = total / msPerDay
-        var rem = total % msPerDay
-        if rem < 0 {
-            rem += msPerDay
-            days -= 1
-        }
-        let date = NaiveDate(epochDays: days)
-        return String(
-            format: "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-            date.year, date.month, date.day,
-            rem / 3_600_000, (rem / 60_000) % 60, (rem / 1000) % 60, rem % 1000)
-    }
-
-    /// `toISOString().slice(0, 10)` — the UTC calendar day.
-    static func day(_ ms: Double) -> String {
-        String(timestamp(ms).prefix(10))
-    }
-}
 
 /// ex-`PairRecord`.
 nonisolated struct DramaPairRecord: Codable, Equatable {
@@ -111,7 +88,9 @@ private func jsLess(_ a: String, _ b: String) -> Bool {
 final class DramaManager {
     private let flock: Flock
     /// Internal (not private) so tests can inspect it.
-    private(set) var state = DramaFile(pettingDate: SimISO.day(SimClock.nowMs()))
+    private(set) var state = DramaFile(pettingDate: DayClock.today())
+    /// Pair key → epoch ms of its last showdown stalemate (in memory only).
+    private var showdownStalemateAt: [String: Double] = [:]
     private var aiNarrationCooldownUntil: Double = 0
     private var unsubscribePetted: (() -> Void)?
     private var tickTimer: TimerToken?
@@ -212,9 +191,11 @@ final class DramaManager {
         let key = pairKey(pair.0, pair.1)
         guard let rec = state.pairs[key], rec.state == .feud else { return }
         if reconciled {
+            showdownStalemateAt[key] = nil
             applyTransition(DramaTransition(
                 idA: pair.0, idB: pair.1, from: .feud, to: .reconciling, cause: "showdown"))
         } else {
+            showdownStalemateAt[key] = SimClock.nowMs()
             state.log.append(DramaLogEntry(
                 at: SimISO.timestamp(SimClock.nowMs()),
                 text: "\(pair.0) & \(pair.1): showdown ended in a stalemate"))
@@ -232,7 +213,7 @@ final class DramaManager {
     }
 
     private func resetPettingIfNewDay() {
-        let today = SimISO.day(SimClock.nowMs())
+        let today = DayClock.today() // local; the TS rolled petting over at UTC midnight
         if state.pettingDate != today {
             state.pettingToday = [:]
             state.pettingDate = today
@@ -404,7 +385,8 @@ final class DramaManager {
                 }
 
                 // Long feuds may erupt into a high-noon showdown.
-                if now - rec.since >= SHOWDOWN_MS && SimRandom.next() < SHOWDOWN_CHANCE,
+                let retryOK = showdownStalemateAt[key].map { now - $0 >= SHOWDOWN_RETRY_MS } ?? true
+                if now - rec.since >= SHOWDOWN_MS && retryOK && SimRandom.next() < SHOWDOWN_CHANCE,
                    let spectacle = onDramaTriggeredSpectacle {
                     spectacle(.showdown, (idA, idB))
                 }

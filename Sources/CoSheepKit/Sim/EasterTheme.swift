@@ -250,9 +250,13 @@ final class EasterTheme: EasterThemeHooks {
         refreshActiveState(true)
     }
 
+    /// Only an actual on/off flip re-seeds the meadow (like SummerTheme).
+    /// Every settings reload re-applies the mode: forcing a refresh here
+    /// reshuffled the flowers and eggs on each save and broke a running hunt
+    /// (its egg indices pointed into the old eggs).
     func setModeOverride(_ mode: EasterMode = .auto) {
         modeOverride = mode
-        refreshActiveState(true)
+        refreshActiveState()
     }
 
     func getModeOverride() -> EasterMode {

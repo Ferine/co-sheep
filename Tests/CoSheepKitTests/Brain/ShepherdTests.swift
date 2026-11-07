@@ -90,6 +90,55 @@ extension BrainTests {
             #expect(sch.tick(sessions: [failing], nowMs: 3 * MINUTE) == .failureStreak(name: "web", failures: 3))
         }
 
+        // MARK: claims
+
+        @Test func aReleasedLongWaitIsDueAgainAndTheCooldownHandedBack() {
+            var sch = ShepherdScheduler()
+            let waiting = lamb("w", name: "web", phase: .waiting, phaseSinceMs: 0)
+            #expect(sch.tick(sessions: [waiting], nowMs: 3 * MINUTE) != nil)
+            sch.release(sch.lastClaim, keepCooldown: false)
+            // Nothing was said: neither the wait episode nor the cooldown is spent.
+            #expect(sch.tick(sessions: [waiting], nowMs: 3 * MINUTE + 5000)
+                == .longWait(name: "web", minutes: 3, waitingFor: nil))
+        }
+
+        @Test func aReleaseThatKeepsTheCooldownDefersTheTriggerPastIt() {
+            var sch = ShepherdScheduler()
+            let failing = lamb("b", name: "web", failures: 3)
+            #expect(sch.tick(sessions: [failing], nowMs: 0) == .failureStreak(name: "web", failures: 3))
+            sch.release(sch.lastClaim, keepCooldown: true)
+            #expect(sch.tick(sessions: [failing], nowMs: 1 * MINUTE) == nil)
+            #expect(sch.tick(sessions: [failing], nowMs: 3 * MINUTE) == .failureStreak(name: "web", failures: 3))
+        }
+
+        @Test func aCommittedTriggerStaysConsumed() {
+            var sch = ShepherdScheduler()
+            let failing = lamb("b", name: "web", failures: 3)
+            #expect(sch.tick(sessions: [failing], nowMs: 0) != nil)
+            sch.commit(sch.lastClaim)
+            sch.release(sch.lastClaim, keepCooldown: false) // already settled: a no-op
+            #expect(sch.tick(sessions: [failing], nowMs: 10 * MINUTE) == nil)
+        }
+
+        @Test func aReleasedEdgeTriggerStaysDroppedButHandsBackTheCooldown() {
+            var sch = ShepherdScheduler(rules: .init(arrivalWindowMs: 0))
+            #expect(sch.observe(change(lamb("a", name: "api"), .arrived), nowMs: 0) != nil)
+            sch.release(sch.lastClaim, keepCooldown: false)
+            #expect(sch.tick(sessions: [lamb("a", name: "api")], nowMs: 1000) == nil) // no replay
+            #expect(sch.observe(change(lamb("b", name: "web"), .arrived), nowMs: 2000) == .arrival(name: "web"))
+        }
+
+        @Test func aClaimFollowsARekeyedLamb() {
+            var sch = ShepherdScheduler()
+            let failing = lamb("old", name: "web", failures: 3)
+            #expect(sch.tick(sessions: [failing], nowMs: 0) != nil)
+            let claim = sch.lastClaim
+            let rekeyed = lamb("new", name: "web", failures: 3)
+            _ = sch.observe(change(rekeyed, previousId: "old"), nowMs: 1000)
+            sch.release(claim, keepCooldown: false)
+            #expect(sch.tick(sessions: [rekeyed], nowMs: 2000) == .failureStreak(name: "web", failures: 3))
+        }
+
         @Test func aBackwardsClockDoesNotMuteTheShepherdForever() {
             var sch = ShepherdScheduler()
             #expect(sch.observe(change(lamb("a", name: "api"), .arrived), nowMs: 10 * MINUTE) != nil)
@@ -1088,9 +1137,9 @@ extension BrainTests {
             #expect(rig.calls.isEmpty)
             #expect(rig.spoken.isEmpty)
 
-            // Switched back on: the wait nobody heard about is still news.
+            // Switched back on: the wait nobody heard about is still news (and
+            // the muted arrival spent no cooldown).
             rig.enabled = true
-            rig.clock += 4 * MINUTE // past the cooldown the muted arrival consumed
             shepherd.tick(sessions: [waiting])
             await shepherd.lastTask?.value
             #expect(rig.spoken.count == 1)
@@ -1125,6 +1174,44 @@ extension BrainTests {
             shepherd.tick(sessions: [waiting])
             await shepherd.lastTask?.value
             #expect(rig.spoken.count == 1)
+        }
+
+        @Test func aLongWaitDroppedForABusyBubbleIsSpokenAfterTheCooldown() async {
+            let rig = Rig()
+            rig.reply = { [rig] _, _ in
+                rig.canSpeak = false // the user opened a chat while the model thought
+                return "Tch. Unheard."
+            }
+            let shepherd = rig.make()
+            let waiting = lamb("w", name: "web", phase: .waiting, phaseSinceMs: rig.clock - 3 * MINUTE)
+            shepherd.tick(sessions: [waiting])
+            await shepherd.lastTask?.value
+            #expect(rig.spoken.isEmpty)
+
+            rig.canSpeak = true
+            rig.reply = { _, _ in "Tch. Web is still at the fence." }
+            shepherd.tick(sessions: [waiting])
+            #expect(rig.calls.count == 1) // a line was attempted: the cooldown stands
+            rig.clock += 3 * MINUTE
+            shepherd.tick(sessions: [waiting])
+            await shepherd.lastTask?.value
+            #expect(rig.spoken == ["Tch. Web is still at the fence."])
+        }
+
+        @Test func aFailureStreakObservedWhileTheBubbleIsBusyIsNotSwallowed() async {
+            let rig = Rig()
+            let shepherd = rig.make()
+            let failing = lamb("c", name: "ios", phase: .working, failures: 3)
+            rig.canSpeak = false
+            shepherd.observe(change(failing, .toolFailed, from: .working), sessions: [failing])
+            #expect(shepherd.lastTask == nil)
+            #expect(rig.calls.isEmpty)
+
+            rig.canSpeak = true
+            shepherd.tick(sessions: [failing])
+            await shepherd.lastTask?.value
+            #expect(rig.spoken.count == 1)
+            #expect(rig.calls.count == 1)
         }
 
         @Test func theChangedSessionIsInThePromptEvenIfTheCallerOmitsIt() async {

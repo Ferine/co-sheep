@@ -83,6 +83,15 @@ final class VisionPipeline {
     /// "Comment now" ignores it, like the Rust menu handlers did.
     var isPaused = false
 
+    /// Nobody can see the screen (asleep, locked, screen saver, switched
+    /// out): the loop skips its run rather than read the lock screen or a
+    /// screen saver and comment on it. Set from `PowerMonitor`.
+    var isAway = false {
+        didSet {
+            if isAway != oldValue { Log.info("vision", isAway ? "nobody's looking: skipping ticks" : "back: looking again") }
+        }
+    }
+
     /// ex-`VISION_TICK_RUNNING`: true while a pipeline run is in flight.
     /// Reflection and backfill yield to it.
     /// ex-VISION_TICK_RUNNING. A counter, not a Bool: a "Comment Now" run
@@ -150,9 +159,10 @@ final class VisionPipeline {
 
         // --- Main vision loop ---
         while true {
-            if !isPaused {
+            if !isPaused && !isAway {
                 do {
                     try await runVisionPipeline()
+                    lastAnnouncedFailure = nil // a later capture failure is news again
                 } catch {
                     if Task.isCancelled { return }
                     let msg = Self.describe(error)
@@ -160,9 +170,11 @@ final class VisionPipeline {
 
                     // Surface capture/permission errors to the user. A VisionError is
                     // a model-output parse failure whose message quotes the model's
-                    // raw reply, which may well mention "the screen".
+                    // raw reply, which may well mention "the screen". Once per
+                    // failure streak: a revoked permission fails every tick, and
+                    // the line (and the scene it interrupts) would repeat forever.
                     if Self.isCaptureError(error, msg) {
-                        events.sheepCommentary.emit(CommentaryEvent(text: Self.SCREEN_ERROR_LINE, animation: nil))
+                        announceFailure("tick: capture", Self.SCREEN_ERROR_LINE)
                     }
                 }
             }

@@ -38,8 +38,8 @@ nonisolated enum SpectaclePhase: String, CaseIterable {
     case enter, perform, exit
 }
 
-/// One running scene. A class: the TS object is mutated in place (also from
-/// its draw code, see `drawTumbleweed`) and read by the Flock afterwards.
+/// One running scene. A class: the TS object is mutated in place by the
+/// update functions and read by the Flock afterwards. Draw code only reads it.
 final class SpectacleScene {
     let type: SpectacleType
     var phase: SpectaclePhase
@@ -309,6 +309,9 @@ private func updateShearing(_ scene: SpectacleScene, _ dt: Double, _ world: Spec
     return scene.timer < SpectacleRenderData.SHEARING_TOTAL_MS
 }
 
+private let TUMBLEWEED_START_X: Double = -20
+private let TUMBLEWEED_PX_PER_MS: Double = 0.24
+
 private func updateShowdown(_ scene: SpectacleScene, _ dt: Double, _ world: SpectacleWorld) -> Bool {
     let SIZE = SpectacleRenderData.SIZE
     guard let pairIds = scene.pairIds else { return false }
@@ -333,6 +336,9 @@ private func updateShowdown(_ scene: SpectacleScene, _ dt: Double, _ world: Spec
             scene.timer = 0
         }
     } else if scene.phase == .perform {
+        // The tumbleweed rolls in sim time (the TS moved it 4px per draw call,
+        // i.e. at the redraw rate; 0.24 px/ms is that at 60 fps).
+        scene.data["tumbleX"] = (scene.data["tumbleX"] ?? TUMBLEWEED_START_X) + TUMBLEWEED_PX_PER_MS * dt
         a.sheep.facingRight = b.sheep.x > a.sheep.x
         b.sheep.facingRight = a.sheep.x > b.sheep.x
         if !scene.flag("vibe0") {
@@ -553,8 +559,7 @@ private func drawShornOverlays(_ ctx: Canvas, _ scene: SpectacleScene, _ world: 
 
 private func drawTumbleweed(_ ctx: Canvas, _ scene: SpectacleScene, _ world: SpectacleWorld) {
     if scene.phase != .perform { return }
-    let x = (scene.data["tumbleX"] ?? -20) + 4
-    scene.data["tumbleX"] = x
+    let x = scene.data["tumbleX"] ?? TUMBLEWEED_START_X
     let y = world.screenH - 130 + abs(sin(x / 40)) * -18
     ctx.save()
     ctx.strokeStyle = "#b0925a"

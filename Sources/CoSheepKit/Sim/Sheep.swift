@@ -347,7 +347,9 @@ final class Sheep {
 
     /// Start stampede — scatter away from the given X coordinate
     func startStampede(_ mouseX: Double) {
-        if state == .parachute || state == .stacked { return }
+        // A held sheep (in the user's hand or a UFO's beam) can't bolt: it
+        // would run off mid-air and leave its holder pointing at nothing.
+        if state == .parachute || state == .stacked || state == .grabbed { return }
         // Unstack if involved in a stack
         if let by = stackedBy {
             by.stackedOn = nil
@@ -528,6 +530,9 @@ final class Sheep {
         } else if state == .idleEggPainting {
             eggPaintingRegistered = false
         }
+        // A zoom burst cut short (reset, grab, poke) must not leak into the
+        // next zooming spell, whose first burst would skip picking a direction.
+        idleZoomBurst = false
         state = newState
         stateTimer = 0
         stateDuration = duration

@@ -392,6 +392,45 @@ struct HerdStoreTests {
         #expect(rig.store.sessions.isEmpty)
     }
 
+    // MARK: sleep
+
+    @Test func aNightAsleepIsNotSilence() {
+        let rig = makeRig()
+        rig.store.ingest(F.hook("SessionStart", session: "a", pid: 100))
+        rig.clock.advance(minutes: 30)
+        rig.store.willSleep()
+        rig.clock.advance(minutes: 8 * 60)
+        rig.store.sweep() // the sweep loop can resume before the wake is handled
+        #expect(rig.store.sessions.count == 1)
+        rig.store.didWake()
+        rig.store.sweep()
+        #expect(rig.store.sessions.count == 1) // 30 awake minutes of silence, not 8.5 hours
+
+        rig.clock.advance(minutes: 16)
+        rig.store.sweep()
+        #expect(rig.store.sessions.isEmpty) // 46 awake minutes: gone
+    }
+
+    @Test func aSleepDoesNotSpareADeadProcess() {
+        let rig = makeRig()
+        rig.store.ingest(F.hook("SessionStart", session: "a", pid: 100))
+        rig.store.willSleep()
+        rig.clock.advance(minutes: 60)
+        rig.store.didWake()
+        rig.dead.pids = [100]
+        rig.store.sweep()
+        #expect(rig.store.sessions.isEmpty)
+    }
+
+    @Test func aWakeWithoutASleepChangesNothing() {
+        let rig = makeRig()
+        rig.store.ingest(F.hook("SessionStart"))
+        rig.clock.advance(minutes: 46)
+        rig.store.didWake()
+        rig.store.sweep()
+        #expect(rig.store.sessions.isEmpty)
+    }
+
     @Test func aSessionThatDepartsStopsBeingTailedAndForgotten() async {
         let rig = makeRig()
         rig.store.ingest(F.hook("SessionStart", transcript: "/t/a.jsonl", pid: 100))

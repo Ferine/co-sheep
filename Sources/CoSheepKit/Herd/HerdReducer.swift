@@ -175,6 +175,9 @@ nonisolated enum HerdReducer {
 
         case "PostToolUse":
             setTool(&s, toolName: e.toolName)
+            // An answered question is done asking: the lamb works on without
+            // the "asking" placard (which reads as waiting on the human).
+            if s.tool == .ask { s.tool = .thinking }
             setPhase(&s, .working, nowMs: nowMs)
             return nil
 
@@ -298,6 +301,16 @@ nonisolated enum HerdReducer {
     /// or nothing (hook event, transcript growth) for 45 min: ended. `working`
     /// and silent for 10 min: idle. Then cleared sessions whose `SessionStart`
     /// never came leave. Ended sessions are removed after their change.
+    /// The Mac slept for `sleptMs`. Every process was frozen, so nothing
+    /// could have happened: that time isn't silence. Without this, the first
+    /// sweep after a night asleep (well past `silenceLimitMs`) sent every lamb
+    /// home even though its agent was alive and about to carry on.
+    static func excludeSleep(_ state: inout HerdState, sleptMs: Double) {
+        guard sleptMs > 0 else { return }
+        for id in Array(state.sessions.keys) { state.sessions[id]?.lastEventMs += sleptMs }
+        for i in state.recentlyCleared.indices { state.recentlyCleared[i].atMs += sleptMs }
+    }
+
     static func sweep(
         _ state: inout HerdState,
         nowMs: Double,

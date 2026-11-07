@@ -752,7 +752,7 @@ struct ShowdownTests {
         #expect(run(ghost, arena) == 1)
     }
 
-    @Test func tumbleweedRollsOnlyWhilePerformingAndAdvancesFourPixelsPerDraw() throws {
+    @Test func tumbleweedRollsOnlyWhilePerformingInSimTimeAndDrawingNeverMovesIt() throws {
         let (arena, scene) = setup()
         scene.phase = .enter
         #expect(group(draw(scene, arena), "spectacle")?.ops.isEmpty == true)
@@ -760,15 +760,22 @@ struct ShowdownTests {
 
         scene.phase = .perform
         let first = try #require(group(draw(scene, arena), "spectacle"))
-        #expect(scene.data["tumbleX"] == -16)
-        #expect(first.ops.count == 1) // one stroked path
+        #expect(first.ops.count == 1) // one stroked path, at the start
         _ = draw(scene, arena)
         _ = draw(scene, arena)
-        #expect(scene.data["tumbleX"] == -8)
+        #expect(scene.data["tumbleX"] == nil) // drawing is read-only
+
+        _ = updateSpectacleScene(scene, 50, arena.world)
+        let rolled = try #require(scene.data["tumbleX"])
+        #expect(abs(rolled - -8) < 1e-9) // -20 + 0.24 px/ms * 50ms
+        let a = try #require(group(draw(scene, arena), "spectacle"))
+        let b = try #require(group(draw(scene, arena), "spectacle"))
+        #expect(a.ops == b.ops) // the same state draws the same frame
 
         scene.phase = .exit
-        _ = draw(scene, arena)
-        #expect(scene.data["tumbleX"] == -8)
+        scene.timer = 0
+        _ = updateSpectacleScene(scene, 16, arena.world)
+        #expect(scene.data["tumbleX"] == rolled)
     }
 }
 

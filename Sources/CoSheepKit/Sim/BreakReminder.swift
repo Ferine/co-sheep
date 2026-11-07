@@ -78,7 +78,16 @@ final class BreakReminder {
         }
     }
 
+    /// Re-enabling restarts the work clock: `update` doesn't run while
+    /// disabled, so the time spent off must not count as one long work
+    /// session (the TS fired on the very next check). Re-asserting the current
+    /// value — every settings reload does — changes nothing.
     func setEnabled(_ on: Bool) {
+        if on && !enabled {
+            lastBoredTime = SimClock.nowMs()
+            reminderShown = false
+            checkAccum = 0
+        }
         enabled = on
     }
 }

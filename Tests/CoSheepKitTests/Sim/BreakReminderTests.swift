@@ -81,7 +81,27 @@ struct BreakReminderTests {
             clock.ms += minutes46
             reminder.update(30_000, .idle, bubble, "snarky")
             #expect(!bubble.visible)
+        }
+    }
+
+    @Test func reEnablingRestartsTheWorkClock() {
+        run { clock, reminder, bubble in
+            reminder.setEnabled(false)
+            clock.ms += minutes46
             reminder.setEnabled(true)
+            // The disabled stretch isn't one long work session.
+            reminder.update(30_000, .idle, bubble, "snarky")
+            #expect(!bubble.visible)
+            clock.ms += minutes46
+            reminder.update(30_000, .idle, bubble, "snarky")
+            #expect(bubble.visible)
+        }
+    }
+
+    @Test func reassertingEnabledKeepsTheWorkClock() {
+        run { clock, reminder, bubble in
+            clock.ms += minutes46
+            reminder.setEnabled(true) // a settings reload while already on
             reminder.update(30_000, .idle, bubble, "snarky")
             #expect(bubble.visible)
         }

@@ -555,12 +555,16 @@ private func finalizeHuntSummary(_ activity: GroupActivity, _ easterTheme: Easte
     }.map(\.element)
 
     let winnerId: String? = if let first = finders.first, first.eggsFound > 0 { first.id } else { nil }
+    // The summary is seeded with `durationMs: 0` when the hunt starts, so 0
+    // means "not captured yet": the first finalize (hunt end, still in
+    // performing) captures the elapsed time, and the celebration's re-finalize
+    // — after `activity.timer` was reset — keeps it. (The TS used `??` on the
+    // seeded 0, so the duration was never captured.)
+    let capturedMs = activity.huntSummary?.durationMs ?? 0
     let summary = EasterHuntSummary(
         totalEggs: activity.huntSummary?.totalEggs ?? easterTheme?.getEggPositions().count
             ?? activity.collectedEggs?.count ?? 0,
-        // Keep the duration captured at hunt end — the celebration phase
-        // re-finalizes after resetting activity.timer
-        durationMs: activity.huntSummary?.durationMs ?? activity.timer,
+        durationMs: capturedMs > 0 ? capturedMs : activity.timer,
         allCollected: allCollected,
         paintedEggsUsed: activity.huntSummary?.paintedEggsUsed ?? easterTheme?.getPaintedEggsUsedCount() ?? 0,
         winnerId: winnerId,

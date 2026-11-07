@@ -245,6 +245,34 @@ extension BrainTests {
             }
         }
 
+        @Test func nobodyLookingSkipsTheTicks() async throws {
+            await withBrainRoot { _ in
+                let rig = VisionRig(sleepLimit: 3)
+                rig.pipeline.isAway = true // locked, asleep, or the screen saver is up
+
+                await rig.pipeline.run()
+
+                #expect(rig.screen.captureCount == 1) // the prerequisite check only
+                #expect(rig.commentary.texts.isEmpty)
+                #expect(rig.sleeps.calls == [8, 120, 120]) // the loop keeps its pace
+            }
+        }
+
+        @Test func aFailingCaptureIsAnnouncedOncePerStreak() async throws {
+            await withBrainRoot { _ in
+                let rig = VisionRig(sleepLimit: 5)
+                // capture #1 = prerequisites; ticks #2, #3 fail, #4 works, #5 fails again
+                rig.screen.captureHook = { n in
+                    if [2, 3, 5].contains(n) { throw PlatformError("Failed to capture screen") }
+                }
+
+                await rig.pipeline.run()
+
+                #expect(rig.commentary.texts
+                    == [VisionPipeline.SCREEN_ERROR_LINE, "Baaa.", VisionPipeline.SCREEN_ERROR_LINE])
+            }
+        }
+
         @Test func aClassificationParseErrorEchoingTheWordScreenStaysQuiet() async throws {
             // The parse error quotes the model's raw reply; "screen" coming from
             // the model is no reason to blame screen recording (Rust did).

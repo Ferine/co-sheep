@@ -62,14 +62,20 @@ final class Weather {
     private var cachedLocation: String?
     private var failedAtMs: Double?
     static let failureBackoffSeconds = 5.0 * 60.0
+    /// A failed refresh falls back to the cached reading only while it is
+    /// this fresh: after a night asleep, "sunny" from yesterday afternoon is
+    /// worse than no weather.
+    static let maxStaleSeconds = 3.0 * 3600.0
 
     /// - Parameters:
     ///   - fetch: the network call. Injected in tests.
-    ///   - now: monotonic milliseconds (ex-`Instant`).
+    ///   - now: monotonic milliseconds that keep counting through sleep, so
+    ///     the TTL ages while the Mac sleeps (uptime, the Rust `Instant`,
+    ///     doesn't: a reading from before an 8-hour sleep stayed "fresh").
     init(
         location: @escaping () -> String = { "" },
         fetch: @escaping @Sendable (String) async throws -> WeatherInfo = { try await Weather.fetchWeather(location: $0) },
-        now: @escaping () -> Double = { SimClock.perfMs() }
+        now: @escaping () -> Double = { SimClock.continuousMs() }
     ) {
         self.location = location
         self.fetch = fetch
@@ -95,7 +101,7 @@ final class Weather {
         }
         // Recent failure: don't hammer (or wait on) wttr.in again yet.
         if let failed = failedAtMs, (now() - failed) / 1000 < Self.failureBackoffSeconds {
-            return cachedInfo
+            return staleFallback()
         }
 
         // Fetch fresh
@@ -110,8 +116,14 @@ final class Weather {
             Log.info("weather", "error: Weather fetch failed: \(error)")
             if cachedLocation == loc { failedAtMs = now() }
             // Return stale cache on error
-            return cachedInfo
+            return staleFallback()
         }
+    }
+
+    /// The cached reading, if it isn't too old to stand in for a failed refresh.
+    private func staleFallback() -> WeatherInfo? {
+        guard let info = cachedInfo, let at = cachedAtMs, (now() - at) / 1000 < Self.maxStaleSeconds else { return nil }
+        return info
     }
 
     /// "WEATHER: <description> outside." for prompts, or "" without weather.

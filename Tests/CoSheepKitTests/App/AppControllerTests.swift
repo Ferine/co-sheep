@@ -20,6 +20,8 @@ final class ControllerRig {
     let watch: AppWatch
     let mcp: MCPServer
     let herd: HerdStore
+    let power: PowerMonitor
+    let dayClock: DayClock
     let controller: AppController
 
     init(root: URL, weather: Weather? = nil, createDesktop: Bool = true) {
@@ -36,9 +38,14 @@ final class ControllerRig {
         watch = AppWatch(pollInterval: 3600, events: events, frontmostAppName: { _ in nil })
         herd = HerdStore(events: events)
         mcp = MCPServer(store: SessionStore(events: events), events: events, herd: herd)
+        power = PowerMonitor(
+            events: events, workspaceCenter: NotificationCenter(), distributedCenter: NotificationCenter(),
+            probe: { nil })
+        dayClock = DayClock(center: NotificationCenter())
         controller = AppController(
             model: model, screen: screen.access, events: events, weather: weather,
-            vision: pipeline, appWatch: watch, mcpServer: mcp, herdStore: herd, desktopDirectory: desktop)
+            vision: pipeline, appWatch: watch, mcpServer: mcp, herdStore: herd, desktopDirectory: desktop,
+            power: power, dayClock: dayClock)
     }
 }
 
@@ -65,16 +72,6 @@ extension BrainTests {
             }
         }
 
-        @Test func checkScreenPermissionReadsThePreflight() {
-            withBrainRoot { root in
-                let rig = ControllerRig(root: root)
-                #expect(rig.controller.checkScreenPermission() == true)
-                rig.screen.permitted = false
-                #expect(rig.controller.checkScreenPermission() == false)
-                #expect(rig.screen.permissionRequests == 0) // checking never prompts
-            }
-        }
-
         // MARK: recording
 
         @Test func recordInteractionCountsAndJournals() {
@@ -86,71 +83,16 @@ extension BrainTests {
             }
         }
 
-        @Test func recordAppUsageBumpsAPerCategoryTallyAndReturnsIt() {
-            withBrainRoot { root in
-                let rig = ControllerRig(root: root)
-                #expect(rig.controller.recordAppUsage("coding") == 1)
-                #expect(rig.controller.recordAppUsage("coding") == 2)
-                #expect(rig.controller.recordAppUsage("social") == 1)
-                #expect(Memory.loadBrain().todayCounts == ["app:coding": 2, "app:social": 1])
-            }
-        }
-
-        @Test func livingStateRoundTripsAndRejectsBadNames() throws {
-            withBrainRoot { root in
-                let rig = ControllerRig(root: root)
-                #expect(rig.controller.getLivingState("spectacles") == .null)
-
-                let value = JSONValue.object(["next": .number(12), "kinds": .array([.string("wolf")])])
-                rig.controller.saveLivingState("spectacles", value)
-                #expect(rig.controller.getLivingState("spectacles") == value)
-                #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("spectacles.json").path))
-
-                rig.controller.saveLivingState("../evil", value)
-                #expect(rig.controller.getLivingState("../evil") == .null)
-                #expect(!FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent("evil.json").path))
-            }
-        }
-
         @Test func friendPetsAndMoods() {
             withBrainRoot { root in
                 let rig = ControllerRig(root: root)
                 FriendMemory.ensureBrain("good_colleague", "Good Colleague")
-                #expect(rig.controller.getFriendMoods() == ["good_colleague": "grumpy"])
+                #expect(FriendMemory.getAllMoods() == ["good_colleague": "grumpy"])
 
                 rig.controller.recordFriendPet("good_colleague")
 
-                #expect(rig.controller.getFriendMoods() == ["good_colleague": "happy"])
+                #expect(FriendMemory.getAllMoods() == ["good_colleague": "happy"])
                 #expect(FriendMemory.getFriendBrain("good_colleague").stats.timesPetted == 1)
-            }
-        }
-
-        @Test func flockBookkeepingReachesFriendMemory() {
-            withBrainRoot { root in
-                let rig = ControllerRig(root: root)
-                FriendMemory.ensureBrain("a", "Fluffy")
-                FriendMemory.ensureBrain("b", "Woolly")
-
-                rig.controller.recordFriendConversation(idA: "a", idB: "b", topic: "grass")
-                #expect(FriendMemory.getFriendBrain("a").stats.conversationsTotal == 1)
-                #expect(FriendMemory.getFriendBrain("b").relationships["a"] == 1)
-
-                rig.controller.recordGroupActivity(participants: ["a", "b"], activityType: "campfire")
-                #expect(FriendMemory.getFriendBrain("a").stats.groupActivities == 1)
-                #expect(FriendMemory.getFriendBrain("a").memories.last?.text == "Joined a campfire with Woolly")
-            }
-        }
-
-        @Test func recordSpectacleWritesMemoriesAndADiaryLine() {
-            withBrainRoot { root in
-                let rig = ControllerRig(root: root)
-                FriendMemory.ensureBrain("a", "Fluffy")
-                FriendMemory.ensureBrain("b", "Woolly")
-
-                rig.controller.recordSpectacle(kind: "wolf attack", participants: ["a", "b"])
-
-                #expect(FriendMemory.getFriendBrain("a").memories.last?.text == "Joined a wolf attack with Woolly")
-                #expect(todaysJournal().contains("*A wolf attack happened on the desktop! The flock is still talking about it.*"))
             }
         }
 
@@ -159,7 +101,7 @@ extension BrainTests {
                 let rig = ControllerRig(root: root)
                 #expect(rig.controller.getEasterStats().huntsToday == 0)
 
-                let stats = rig.controller.recordEasterHunt(EasterHuntResult(
+                let stats = EasterMemory.recordHunt(EasterHuntResult(
                     totalEggs: 5, durationMs: 9000, allCollected: true, paintedEggsUsed: 1,
                     hunters: [
                         EasterHunterResult(id: "main", name: "Sheep", eggsFound: 3, goldenEggsFound: 1),
@@ -170,6 +112,28 @@ extension BrainTests {
                 #expect(stats.huntsCompleted == 1)
                 #expect(stats.topHunterId == "main")
                 #expect(rig.controller.getEasterStats() == stats)
+            }
+        }
+
+        // MARK: power
+
+        @Test func powerChangesRestTheVisionLoopAndPauseTheHerdsSilenceClock() {
+            withBrainRoot { root in
+                let rig = ControllerRig(root: root)
+                var locked = Presence()
+                locked.apply(.locked)
+                rig.controller.powerChanged(PowerChange(event: .locked, presence: locked))
+                #expect(rig.pipeline.isAway)
+
+                rig.herd.ingest(IngestFixtures.hook("SessionStart"))
+                var asleep = locked
+                asleep.apply(.willSleep)
+                rig.controller.powerChanged(PowerChange(event: .willSleep, presence: asleep))
+                rig.herd.sweep()
+                #expect(rig.herd.sessions.count == 1) // the sweep waits for the wake
+
+                rig.controller.powerChanged(PowerChange(event: .unlocked, presence: Presence()))
+                #expect(!rig.pipeline.isAway)
             }
         }
 

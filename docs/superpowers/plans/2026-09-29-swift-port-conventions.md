@@ -33,16 +33,18 @@ modify it.
 | `ctx` Canvas2D | `Canvas` — same member names: `fillStyle`, `strokeStyle` (String or `CanvasGradient`), `lineWidth`, `lineCap` ("round"…), `globalAlpha`, `font`, `textAlign`, `textBaseline`, `shadowBlur`, `shadowColor`, `imageSmoothingEnabled`, `save()`, `restore()`, `translate`, `rotate`, `scale`, `beginPath`, `moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc(x,y,r,a0,a1,ccw)`, `ellipse(...)`, `rect`, `roundRect(x,y,w,h,r)`, `closePath`, `fill()`, `stroke()`, `fillRect`, `strokeRect`, `clearRect`, `fillText`, `measureText(t).width`, `createLinearGradient`, `createRadialGradient` → `.addColorStop(o, "css")`, `drawImage` | `Render/Canvas.swift` |
 | Tiles/z-order | `ctx.group("key", layer: .world \| .overlay) { … }` — each group becomes one GPU tile. Whoever *calls* an entity's draw wraps it. Entities just draw. | `Render/Canvas.swift` |
 | Sprites | `SpriteSheet(src, fw, fh, frames, fps)`, `.update(dt)`, `.draw(ctx, x, y, scale, flipX, tint)`, `.reset()` | `Render/SpriteSheet.swift` |
-| `Math.random()` | `SimRandom.next()`, `SimRandom.int(n)`, `SimRandom.pick(arr)` | `Sim/SimRuntime.swift` |
-| `Date.now()` / `performance.now()` / `getHours()` | `SimClock.nowMs()` / `SimClock.perfMs()` / `SimClock.hour()` | `Sim/SimRuntime.swift` |
-| `setTimeout` / `setInterval` / `clear*` | `SimTimers.after(ms) {…}` / `SimTimers.every(ms) {…}` → `TimerToken.cancel()` | `Sim/SimRuntime.swift` |
+| `Math.random()` | `SimRandom.next()`, `SimRandom.int(n)`, `SimRandom.pick(arr)` | `Foundation/SimRuntime.swift` |
+| `Date.now()` / `performance.now()` / `getHours()` | `SimClock.nowMs()` / `SimClock.perfMs()` (stops in sleep) / `SimClock.continuousMs()` (counts through sleep, for TTLs) / `SimClock.hour()`; `SimClock.timeZone` is "local" (tests pin it) | `Foundation/SimRuntime.swift` |
+| Today / day changes | `DayClock.today()` (local `yyyy-MM-dd`, never UTC), `BrainTime`, `NaiveDate`; `AppController.dayClock.dayChanged` for once-a-day work | `Foundation/Dates.swift`, `Foundation/DayClock.swift` |
+| Sleep / lock / screen saver | `AppEvents.power` → `PowerChange(event, presence)`; `presence.isAway` = nobody can see the screen | `Services/PowerMonitor.swift` |
+| `setTimeout` / `setInterval` / `clear*` | `SimTimers.after(ms) {…}` / `SimTimers.every(ms) {…}` → `TimerToken.cancel()` | `Foundation/SimRuntime.swift` |
 | flock `bus` | `bus.emit(.sheepPetted(id:))`, `bus.on(.sheepPetted) { event in … }` → unsubscribe closure | `Sim/FlockBus.swift` |
-| Tauri `listen`/`emit` (backend→overlay) | `AppEvents.shared.<signal>.on { … }` / `.emit(…)` | `Services/AppEvents.swift` |
+| Tauri `listen`/`emit` (backend→overlay) | `AppEvents.shared.<signal>.on { … }` / `.emit(…)` (`Signal` itself: `Foundation/Signal.swift`) | `Services/AppEvents.swift` |
 | types.ts | `SheepState`, `SheepAnimation`, `CommentaryEvent`, `SessionEvent`, `FriendColor`, `FriendPersonality`, `FriendConfig`, `ConversationLine`/`ConversationScript`, `WindowPlatform`, `FRIEND_TINTS`, `EasterThemeHooks` | `Sim/SimTypes.swift` |
 | On-device model | `protocol LanguageModel` (`generate`, `generateChat`, `ocr`, `unavailableReason`), `HistoryTurn` | `Services/LanguageModel.swift` |
-| Logging (`log!`/`debug!`/`console.log`) | `Log.info("tag", "msg")`, `Log.debug(...)`, `Log.truncateForLog`, `Log.rawForLog`, global `truncateUTF8(s, maxBytes:)` | `Services/Log.swift` |
-| `~/.co-sheep` | `Paths.root/.config/.opinions/.journal/.friends`, `Paths.file(name)`, `Paths.dir(name)` — add more paths as `extension Paths` in *your own* file | `Brain/Paths.swift` |
-| JSON files | `JSONFile.read/readStrict/write/writeData`, `JSONValue` (≈ `serde_json::Value`) | `Brain/JSONFile.swift` |
+| Logging (`log!`/`debug!`/`console.log`) | `Log.info("tag", "msg")`, `Log.debug(...)`, `Log.truncateForLog`, `Log.rawForLog`, global `truncateUTF8(s, maxBytes:)` | `Foundation/Log.swift` |
+| `~/.co-sheep` | `Paths.root/.config/.opinions/.journal/.friends`, `Paths.file(name)`, `Paths.dir(name)` — add more paths as `extension Paths` in *your own* file | `Foundation/Paths.swift` |
+| JSON files | `JSONFile.read/readStrict/write/writeData`, `JSONValue` (≈ `serde_json::Value`) | `Foundation/JSONFile.swift` |
 | Bundled images | `ResourceFiles.cgImage("sprites/x.png")` | `Services/ResourceFiles.swift` |
 | SK-native effects | `OverlayScene.nightBackLayer` (z −1000), `.weatherLayer` (z 1000), `.nightFrontLayer` (z 1100), `scenePoint(x, y)` canvas→scene | `Overlay/OverlayScene.swift` |
 
