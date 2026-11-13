@@ -44,6 +44,12 @@ final class SettingsModel: WindowModel {
         ChoiceOption(value: "off", label: "Always off"),
     ]
 
+    static let christmasModes = [
+        ChoiceOption(value: "auto", label: "Auto (December 1 – January 6)"),
+        ChoiceOption(value: "on", label: "Always on"),
+        ChoiceOption(value: "off", label: "Always off"),
+    ]
+
     /// The slider's range (`<input type="range" min="30" max="600" step="10">`).
     static let intervalRange: ClosedRange<Double> = 30...600
     static let intervalStep = 10.0
@@ -55,6 +61,7 @@ final class SettingsModel: WindowModel {
     var weatherLocation = ""
     var easterMode = "auto"
     var summerMode = "auto"
+    var christmasMode = "auto"
     var breakReminders = true
     var herdEnabled = true
     var shepherdCommentary = true
@@ -92,6 +99,7 @@ final class SettingsModel: WindowModel {
         weatherLocation = s.weatherLocation
         easterMode = s.easterMode.isEmpty ? "auto" : s.easterMode
         summerMode = s.summerMode.isEmpty ? "auto" : s.summerMode
+        christmasMode = s.christmasMode.isEmpty ? "auto" : s.christmasMode
         breakReminders = s.breakReminders
         herdEnabled = s.herdEnabled
         shepherdCommentary = s.shepherdCommentary
@@ -109,6 +117,7 @@ final class SettingsModel: WindowModel {
                 easterMode: easterMode,
                 summerMode: summerMode,
                 weatherLocation: Self.trimmed(weatherLocation),
+                christmasMode: christmasMode,
                 herdEnabled: herdEnabled,
                 shepherdCommentary: shepherdCommentary)
             errorMessage = nil
@@ -206,6 +215,16 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("Auto triggers in June–August when the weather is clear and warm (needs a weather location).")
+                }
+
+                Section {
+                    Picker("Christmas Mode", selection: $model.christmasMode) {
+                        ForEach(ChoiceOption.including(model.christmasMode, in: SettingsModel.christmasModes)) {
+                            Text($0.label).tag($0.value)
+                        }
+                    }
+                } footer: {
+                    Text("Tree, lights, snow and nisseluer, plus a julekalender door every day until Christmas Eve.")
                 }
 
                 Section {

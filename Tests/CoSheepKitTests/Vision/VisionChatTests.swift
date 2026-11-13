@@ -171,7 +171,8 @@ extension BrainTests {
                 FriendMemory.ensureBrain("friend_a", "Fluffy")
                 FriendMemory.ensureBrain("friend_b", "Woolly")
                 FriendMemory.recordConversation("friend_a", "friend_b", "grass")
-                try Config.updateConfig { $0.language = "german" }
+                // (Christmas off: this pins the whole prompt, whatever month the suite runs in)
+                try Config.updateConfig { $0.language = "german"; $0.christmasMode = "off" }
                 let rig = VisionRig()
                 rig.model.commentary = #"[{"speaker": "Fluffy", "text": "Baa", "animation": null}]"#
 
@@ -202,6 +203,43 @@ extension BrainTests {
                 #expect(call.prompt == "Generate a conversation between Fluffy and Woolly.")
                 // friend chat is not a sheep comment
                 #expect(rig.commentary.lines.isEmpty)
+            }
+        }
+
+        @Test func christmasReachesTheChatCommentaryAndFriendChatPrompts() async throws {
+            try await withBrainRoot { _ in
+                try Config.updateConfig { $0.christmasMode = "on" }
+                let season = Personality.getSeasonContext()
+                #expect(season.hasPrefix("SEASON: It's Christmas time (jul)."))
+                let rig = VisionRig()
+
+                _ = try await rig.pipeline.chatWithSheep("hello", history: [])
+                #expect(rig.model.chatCalls.last?.system.contains("\n\(season)\n") == true)
+
+                _ = try await rig.pipeline.generateCommentary("screen", context: "ctx", recentJournal: "")
+                #expect(rig.model.generateCalls.last?.system.contains(
+                    "\(season)\nYou may reference Christmas naturally if relevant, but don't force it.\n") == true)
+
+                _ = try await rig.pipeline.friendChat(
+                    friendAId: "a", friendAName: "Fluffy", friendAPersonality: "snarky",
+                    friendBId: "b", friendBName: "Woolly", friendBPersonality: "snarky", topic: nil)
+                #expect(rig.model.generateCalls.last?.system.contains(
+                    "They are pixel sheep living on someone's desktop.\n\(season) They may bring it up, but don't force it.\n\nLANGUAGE:") == true)
+            }
+        }
+
+        @Test func withChristmasOffNoPromptMentionsTheSeason() async throws {
+            try await withBrainRoot { _ in
+                try Config.updateConfig { $0.christmasMode = "off" }
+                let rig = VisionRig()
+                _ = try await rig.pipeline.chatWithSheep("hello", history: [])
+                _ = try await rig.pipeline.generateCommentary("screen", context: "ctx", recentJournal: "")
+                _ = try await rig.pipeline.friendChat(
+                    friendAId: "a", friendAName: "Fluffy", friendAPersonality: "snarky",
+                    friendBId: "b", friendBName: "Woolly", friendBPersonality: "snarky", topic: nil)
+                let systems = rig.model.chatCalls.map(\.system) + rig.model.generateCalls.map(\.system)
+                #expect(systems.count == 3)
+                #expect(systems.allSatisfy { !$0.contains("SEASON") && !$0.contains("Christmas") })
             }
         }
 

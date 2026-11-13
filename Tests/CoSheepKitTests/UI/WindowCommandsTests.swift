@@ -131,6 +131,23 @@ extension BrainTests {
             }
         }
 
+        @Test func saveSettingsWritesTheChristmasModeWhenGivenAndLeavesItOtherwise() throws {
+            try withBrainRoot { _ in
+                try seed { $0.christmasMode = "off" }
+                try WindowCommands.saveSettings(
+                    name: "A", personality: "snarky", intervalSecs: 150, language: "nynorsk",
+                    breakReminders: true, easterMode: "auto", summerMode: "auto", weatherLocation: "")
+                #expect(Config.loadConfig()?.christmasMode == "off")
+
+                let saved = try WindowCommands.saveSettings(
+                    name: "A", personality: "snarky", intervalSecs: 150, language: "nynorsk",
+                    breakReminders: true, easterMode: "auto", summerMode: "auto", weatherLocation: "",
+                    christmasMode: "on")
+                #expect(saved.christmasMode == "on")
+                #expect(Config.loadConfig()?.christmasMode == "on")
+            }
+        }
+
         @Test func saveSettingsCreatesTheConfigOnFirstRun() throws {
             try withBrainRoot { _ in
                 #expect(Config.needsOnboarding())

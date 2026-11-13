@@ -3,10 +3,10 @@ import Foundation
 // Ex-spectacles.ts.
 // Spectacle scheduling — pure logic. Rare, high-impact desktop events.
 // Random spectacles roll on a timer; showdown/feast are drama-triggered
-// and never come from this table.
+// and never come from this table. The sleigh only flies at Christmas.
 
 nonisolated enum SpectacleType: String, CaseIterable, Codable {
-    case wolf, ufo, merchant, balloon, shearing, showdown, feast
+    case wolf, ufo, merchant, balloon, shearing, showdown, feast, sleigh
 }
 
 /// Persisted verbatim as living state "spectacles":
@@ -54,6 +54,9 @@ nonisolated struct SchedulerInput {
     var isNight: Bool
     /// Random [0,1) injected by the caller for testability.
     var rand: Double
+    /// The Christmas event is on: the sleigh joins the table, and is the one
+    /// spectacle that also flies after dark.
+    var christmas: Bool = false
 }
 
 nonisolated enum SPECTACLE {
@@ -66,6 +69,9 @@ nonisolated enum SPECTACLE {
     /// Same spectacle won't repeat within a week.
     static let TYPE_COOLDOWN_MS: Double = 7 * 24 * 3600 * 1000
     static let CHECK_INTERVAL_MS: Double = 5 * 60 * 1000
+    /// The season is short: the sleigh may come back after two days.
+    static let SLEIGH_COOLDOWN_MS: Double = 2 * 24 * 3600 * 1000
+    static let SLEIGH_WEIGHT: Double = 4
 }
 
 nonisolated private let RANDOM_TABLE: [(type: SpectacleType, weight: Double)] = [
@@ -78,7 +84,7 @@ nonisolated private let RANDOM_TABLE: [(type: SpectacleType, weight: Double)] = 
 
 nonisolated func pickRandomSpectacle(_ input: SchedulerInput) -> SpectacleType? {
     let state = input.state, nowMs = input.nowMs, isNight = input.isNight, rand = input.rand
-    if isNight { return nil }
+    if isNight && !input.christmas { return nil }
     if nowMs - state.lastFiredMs < SPECTACLE.MIN_GAP_MS { return nil }
 
     let pityDue = nowMs - state.lastFiredMs >= SPECTACLE.PITY_MS
@@ -89,9 +95,14 @@ nonisolated func pickRandomSpectacle(_ input: SchedulerInput) -> SpectacleType? 
     // weighted walk below would always land on the first entry.
     let pickRand = pityDue ? rand : rand / SPECTACLE.TICK_CHANCE
 
-    let eligible = RANDOM_TABLE.filter { entry in
+    // At night nothing but the sleigh is out; by day it joins the others.
+    var table = isNight ? [] : RANDOM_TABLE
+    if input.christmas { table.append((.sleigh, SPECTACLE.SLEIGH_WEIGHT)) }
+
+    let eligible = table.filter { entry in
         guard let last = state.lastByType[entry.type] else { return true }
-        return nowMs - last >= SPECTACLE.TYPE_COOLDOWN_MS
+        let cooldown = entry.type == .sleigh ? SPECTACLE.SLEIGH_COOLDOWN_MS : SPECTACLE.TYPE_COOLDOWN_MS
+        return nowMs - last >= cooldown
     }
     if eligible.isEmpty { return nil }
 

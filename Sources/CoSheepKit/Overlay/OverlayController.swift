@@ -102,9 +102,11 @@ final class OverlayController: OverlayDriver {
 
         let events = AppEvents.shared
 
-        // Nobody at the screen: gossip stops crediting app time.
+        // Nobody at the screen: gossip stops crediting app time, and the
+        // julekalender keeps its door shut.
         unsubscribers.append(events.power.on { [weak self] change in
             self?.gossipManager.setAway(change.presence.isAway)
+            self?.flock.setHumanAway(change.presence.isAway)
         })
 
         // Bridge the app watcher onto the flock bus.
@@ -117,10 +119,11 @@ final class OverlayController: OverlayDriver {
         applySettings(WindowCommands.getSettings())
         let accessories = WindowCommands.getAccessories()
         if !accessories.isEmpty {
-            flock.main.drawOverlay = createCompositeOverlay(accessories)
+            flock.main.setAccessories(accessories)
         }
 
         flock.applyEasterStats(app.getEasterStats())
+        flock.setTopInset(host.menuBarHeight)
 
         // Saved friends
         for def in WindowCommands.getFriends() {
@@ -159,10 +162,10 @@ final class OverlayController: OverlayDriver {
         })
         unsubscribers.append(events.debugCommand.on { [weak self] cmd in self?.debugCommand(cmd) })
         unsubscribers.append(events.accessoriesChanged.on { [weak self] ids in
-            self?.flock.main.drawOverlay = createCompositeOverlay(ids)
+            self?.flock.main.setAccessories(ids)
         })
         unsubscribers.append(events.friendAccessoriesChanged.on { [weak self] change in
-            self?.flock.getFriendEntry(change.id)?.sheep.drawOverlay = createCompositeOverlay(change.accessories)
+            self?.flock.getFriendEntry(change.id)?.sheep.setAccessories(change.accessories)
         })
 
         NotificationCenter.default.addObserver(
@@ -234,6 +237,7 @@ final class OverlayController: OverlayDriver {
         breakReminder.setEnabled(cfg.breakReminders)
         flock.setEasterMode(EasterMode(rawValue: cfg.easterMode) ?? .auto)
         flock.setSummerMode(SummerMode(rawValue: cfg.summerMode) ?? .auto)
+        flock.setChristmasMode(ChristmasMode(rawValue: cfg.christmasMode) ?? .auto)
     }
 
     private func screenChanged() {
@@ -241,6 +245,7 @@ final class OverlayController: OverlayDriver {
         let size = host.screenSize
         SpeechBubble.viewport = size
         flock.updateScreenSize(size.width, size.height)
+        flock.setTopInset(host.menuBarHeight)
     }
 
     // MARK: - Frame loop (ex-gameLoop)
@@ -460,6 +465,13 @@ final class OverlayController: OverlayDriver {
         } else if cmd == "app-switch" {
             // >1h so gossip fires too
             bus.emit(.appSwitched(AppSwitch(app: "Xcode", previousApp: "Safari", previousDurationMs: 3_700_000)))
+        } else if cmd == "christmas:door" {
+            flock.previewNextDoor()
+        } else if cmd == "christmas:juletregang" || cmd == "christmas:gifts" {
+            let type: GroupActivityType = cmd == "christmas:gifts" ? .giftExchange : .juletregang
+            if !flock.startChristmasActivity(type) {
+                flock.mainBubble.show("No tree, no party. Turn Christmas Mode on (and find me a friend).", duration: 5000)
+            }
         } else if cmd == "herd:demo" {
             flock.herd.startDemo()
         } else if cmd == "herd:clear-demo" {

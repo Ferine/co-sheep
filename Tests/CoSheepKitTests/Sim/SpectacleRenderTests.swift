@@ -887,3 +887,224 @@ struct EverySpectacleTests {
         }
     }
 }
+
+@Suite("sleigh", .serialized)
+struct SleighSceneTests {
+    private let D = SpectacleRenderData.self
+    /// The sleigh crosses the screen plus its own length on both sides in 13s.
+    private var speed: Double { (W + D.SLEIGH_LENGTH * 2) / D.SLEIGH_FLIGHT_MS }
+    private var groundLine: Double { H - 83 }
+
+    private func setup(_ xs: [(String, Double)] = [("main", 300), ("f1", 700)]) -> (Arena, SpectacleScene) {
+        let arena = Arena(xs)
+        return (arena, createSpectacleScene(.sleigh, W, H, arena.order))
+    }
+
+    /// Step until `flag` is set; returns the frame count (-1 on timeout).
+    private func runUntil(_ flag: String, _ scene: SpectacleScene, _ arena: Arena, maxFrames: Int = 3000) -> Int {
+        let world = arena.world
+        for frame in 1...maxFrames {
+            _ = updateSpectacleScene(scene, 16, world)
+            if scene.flag(flag) || scene.data[flag] != nil { return frame }
+        }
+        return -1
+    }
+
+    @Test func startsInTheSkyWithThePresentMeantForTheMainSheep() {
+        let (_, scene) = setup()
+        #expect(scene.phase == .enter)
+        #expect(scene.actorY == H * 0.16)
+        #expect(scene.facingRight)
+        #expect(scene.targetId == "main")
+        #expect(scene.participants == ["main", "f1"])
+        // No main sheep around: the first calm one. Nobody: nobody.
+        #expect(createSpectacleScene(.sleigh, W, H, ["f1", "f2"]).targetId == "f1")
+        #expect(createSpectacleScene(.sleigh, W, H, []).targetId == nil)
+        #expect(D.SLEIGH_LENGTH == 189)
+    }
+
+    @Test func theFlockSitsDownAndWatchesItCross() {
+        let (arena, scene) = setup()
+        let world = arena.world
+        _ = updateSpectacleScene(scene, 16, world)
+        #expect(scene.phase == .perform)
+        #expect(scene.actorX == -189)
+        #expect(arena.sheep("main").state == .sit && arena.sheep("f1").state == .sit)
+        #expect(arena.sheep("main").stateDuration == 16000)
+        // Aimed beside the main sheep (center 348), not on its head
+        #expect(scene.data["dropX"] == 418)
+
+        _ = updateSpectacleScene(scene, 16, world)
+        #expect(abs(scene.actorX - (-189 + speed * 16)) < 1e-9)
+        // It is still off to the left: every head turns that way
+        #expect(!arena.sheep("main").facingRight && !arena.sheep("f1").facingRight)
+
+        // Halfway across, the sheep on the left looks right, the other still left
+        scene.actorX = 400
+        _ = updateSpectacleScene(scene, 16, world)
+        #expect(arena.sheep("main").facingRight)
+        #expect(!arena.sheep("f1").facingRight)
+    }
+
+    @Test func theDropPointStaysOnTheScreen() {
+        let (left, a) = setup([("main", 0)])
+        _ = updateSpectacleScene(a, 16, left.world)
+        #expect(a.data["dropX"] == W * 0.15)
+        let (right, b) = setup([("main", W - 96)])
+        _ = updateSpectacleScene(b, 16, right.world)
+        #expect(b.data["dropX"] == W * 0.85)
+        let (nobody, c) = setup([])
+        _ = updateSpectacleScene(c, 16, nobody.world)
+        #expect(c.data["dropX"] == W / 2)
+    }
+
+    @Test func someoneSpotsItAfterAMoment() {
+        let (arena, scene) = setup()
+        withRandom([0]) {
+            #expect(runUntil("spotted", scene, arena) == 1 + 157) // enter, then the first frame past 2500ms
+        }
+        #expect(arena.bubble("main").currentText == "Is that... a sleigh?")
+        #expect(!arena.bubble("f1").visible)
+    }
+
+    @Test func thePresentDropsAboveItsLandingSpotAndFloatsDown() {
+        let (arena, scene) = setup()
+        let world = arena.world
+        withRandom([0]) { _ = runUntil("dropped", scene, arena) }
+        #expect(scene.actorX + 30 >= 418 && scene.actorX + 30 - speed * 16 < 418)
+        #expect(scene.data["giftX"] == 418)
+        // Released under the sleigh; it has already fallen one frame
+        #expect(abs(scene.data["giftY"]! - (H * 0.16 + 30 + D.SLEIGH_GIFT_FALL_PX_PER_MS * 16)) < 1e-9)
+
+        _ = updateSpectacleScene(scene, 16, world)
+        #expect(abs(scene.data["giftY"]! - (H * 0.16 + 30 + D.SLEIGH_GIFT_FALL_PX_PER_MS * 32)) < 1e-9)
+        #expect(!scene.flag("landed"))
+
+        withRandom([0]) { _ = runUntil("landed", scene, arena) }
+        #expect(scene.data["giftY"] == groundLine)
+        #expect(scene.data["openedAt"] == nil)
+    }
+
+    @Test func itsSheepWalksOverAndOpensIt() {
+        let (arena, scene) = setup()
+        let main = arena.sheep("main")
+        let world = arena.world
+        var frames = -1
+        withRandom([0]) {
+            for frame in 1...3000 {
+                main.update(16) // the arena doesn't step its sheep; this one has somewhere to be
+                if !updateSpectacleScene(scene, 16, world) {
+                    frames = frame
+                    break
+                }
+            }
+        }
+        #expect(frames > 0)
+        #expect(scene.flag("caught"))
+        #expect(arena.bubble("main").currentText == "Air mail!")
+        // It walked right, to within reach of the present
+        #expect(abs(main.x + 48 - 418) < D.SLEIGH_GIFT_REACH + 1)
+        #expect(main.x > 300)
+        // Over once the sleigh has left the screen: (W + 40 + 189) / speed ms, plus the first frame
+        let exitFrame = ((W + 40 + 189) / speed / 16).rounded(.up) + 1
+        #expect(abs(Double(frames) - exitFrame) <= 2)
+    }
+
+    @Test func aPresentNobodyFetchesSparklesAwayAfterNineSeconds() {
+        // Sheep in the arena never move: the main sheep is poked to walk but stays put.
+        let (arena, scene) = setup()
+        var landed = -1
+        var opened = -1
+        withRandom([0]) {
+            landed = runUntil("landed", scene, arena)
+            opened = runUntil("openedAt", scene, arena)
+        }
+        #expect(landed > 0)
+        #expect(abs(Double(opened) * 16 - D.SLEIGH_GIFT_WAIT_MS) <= 32)
+        #expect(!scene.flag("caught"))
+        #expect(arena.sheep("main").state == .walk && arena.sheep("main").facingRight)
+        #expect(!D.SLEIGH_GIFT_LINES.contains(arena.bubble("main").currentText))
+
+        // 1.4s of sparkles, then the scene is over
+        let world = arena.world
+        var rest = 0
+        while updateSpectacleScene(scene, 16, world) { rest += 1 }
+        #expect(abs(Double(rest) * 16 - 1400) <= 32)
+    }
+
+    @Test func aSheepTheHumanIsHoldingDoesNotFetch() {
+        let (arena, scene) = setup()
+        withRandom([0]) { _ = runUntil("landed", scene, arena) }
+        arena.sheep("main").state = .grabbed
+        _ = updateSpectacleScene(scene, 16, arena.world)
+        #expect(arena.sheep("main").state == .grabbed)
+        #expect(scene.data["openedAt"] == nil)
+    }
+
+    @Test func withNobodyAroundItStillFliesDropsAndEnds() {
+        let (arena, scene) = setup([])
+        let frames = withRandom([0]) { run(scene, arena) }
+        #expect(frames > 0)
+        #expect(scene.flag("dropped") && scene.flag("landed") && !scene.flag("caught"))
+    }
+
+    // MARK: drawing
+
+    @Test func theSleighIsItsOwnAnchoredTileAndFlyingOnlyMovesIt() {
+        let (arena, scene) = setup()
+        _ = updateSpectacleScene(scene, 16, arena.world)
+        scene.actorX = 500
+        scene.data["clock"] = 1016
+        let a = draw(scene, arena)
+        #expect(group(a, "spectacle")?.ops.isEmpty == true)
+        let sleigh = group(a, "spectacle:sleigh")!
+        #expect(sleigh.anchor == CGPoint(x: 500, y: H * 0.16 + sin(1016.0 / 700) * 5))
+        #expect(!sleigh.ops.isEmpty)
+        #expect(group(a, "spectacle:gift") == nil)
+        // The whole team fits in a strip: star dust behind, 63 art pixels of sleigh and sheep
+        #expect(sleigh.bounds.minX >= -70 && sleigh.bounds.maxX <= 189 + 1)
+        #expect(sleigh.bounds.minY >= 0 && sleigh.bounds.maxY <= 11 * 3 + 1)
+
+        // 16ms later, within the same gallop and twinkle step: identical ops, new anchor
+        scene.actorX = 502.3
+        scene.data["clock"] = 1032
+        let b = draw(scene, arena)
+        #expect(group(b, "spectacle:sleigh")!.ops == sleigh.ops)
+        #expect(group(b, "spectacle:sleigh")!.anchor != sleigh.anchor)
+
+        // A stride later the legs have changed
+        scene.data["clock"] = 1090
+        #expect(group(draw(scene, arena), "spectacle:sleigh")!.ops != sleigh.ops)
+    }
+
+    @Test func thePresentHangsFromAParachuteThenStandsThenSparkles() {
+        let (arena, scene) = setup()
+        withRandom([0]) { _ = runUntil("dropped", scene, arena) }
+        var canvas = draw(scene, arena)
+        var gift = group(canvas, "spectacle:gift")!
+        // lines, canopy, canopy stripe, and the box (7)
+        #expect(gift.ops.count == 3 + 7)
+        let clock = scene.data["clock"]!
+        #expect(gift.anchor == CGPoint(x: 418 + sin(clock / 400) * 6, y: scene.data["giftY"]!))
+
+        withRandom([0]) { _ = runUntil("landed", scene, arena) }
+        canvas = draw(scene, arena)
+        gift = group(canvas, "spectacle:gift")!
+        #expect(gift.ops.count == 7)
+        #expect(gift.anchor == CGPoint(x: 418, y: groundLine))
+
+        scene.data["openedAt"] = scene.data["clock"]
+        canvas = draw(scene, arena)
+        #expect(group(canvas, "spectacle:gift")?.ops.count == 6) // a ring of sparkles
+        scene.data["clock"] = scene.data["clock"]! + 1500
+        #expect(group(draw(scene, arena), "spectacle:gift") == nil)
+    }
+
+    @Test func nothingIsDrawnBeforeItEntersOrAfterItLeaves() {
+        let (arena, scene) = setup([])
+        #expect(draw(scene, arena).groups.allSatisfy { $0.ops.isEmpty })
+        withRandom([0]) { _ = run(scene, arena) }
+        #expect(scene.phase == .exit)
+        #expect(group(draw(scene, arena), "spectacle:sleigh") == nil)
+    }
+}

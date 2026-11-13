@@ -26,7 +26,13 @@ enum Personality {
         return (timeStr, dayStr, timePeriod)
     }
 
-    static func getSystemPrompt(recentJournal: String, weatherContext: String) -> String {
+    /// "SEASON: …" while the Christmas event is on (settings override or the
+    /// calendar), else "". Passed to the prompts as `seasonContext`.
+    static func getSeasonContext() -> String {
+        ChristmasSeason.promptContext(mode: Config.getChristmasMode())
+    }
+
+    static func getSystemPrompt(recentJournal: String, weatherContext: String, seasonContext: String = "") -> String {
         let name = Config.getSheepName() ?? "Sheep"
         let personality = Config.getPersonality()
         let language = Config.getLanguage()
@@ -50,6 +56,10 @@ enum Personality {
         let weatherSection = weatherContext.isEmpty
             ? ""
             : "\n\(weatherContext)\nYou may reference the weather naturally if relevant, but don't force it.\n"
+
+        let seasonSection = seasonContext.isEmpty
+            ? ""
+            : "\n\(seasonContext)\nYou may reference Christmas naturally if relevant, but don't force it.\n"
 
         let (timeStr, dayStr, timePeriod) = getTimeContext()
 
@@ -114,7 +124,7 @@ You are \#(name), a pixel art sheep that lives on someone's desktop.
 
 TIME AWARENESS: It's currently \#(timeStr) on \#(dayStr). \#(timePeriod)
 You may reference the time naturally if relevant, but don't force it.
-\#(weatherSection)
+\#(weatherSection)\#(seasonSection)
 \#(journalSection)
 
 LANGUAGE: You MUST write all your comments in \#(language). This is critical — always respond in \#(language), no exceptions.
@@ -153,7 +163,7 @@ and today's tallies in your comments — that's what makes you feel alive.
 """#
     }
 
-    static func getChatPrompt(recentContext: String, weatherContext: String) -> String {
+    static func getChatPrompt(recentContext: String, weatherContext: String, seasonContext: String = "") -> String {
         let name = Config.getSheepName() ?? "Sheep"
         let personality = Config.getPersonality()
         let language = Config.getLanguage()
@@ -176,12 +186,13 @@ and today's tallies in your comments — that's what makes you feel alive.
 
         let contextSection = recentContext.isEmpty ? "" : "\n\(recentContext)\n"
         let weatherLine = weatherContext.isEmpty ? "" : "\n\(weatherContext)"
+        let seasonLine = seasonContext.isEmpty ? "" : "\n\(seasonContext)"
 
         return #"""
 You are \#(name), a pixel art sheep on someone's desktop. \#(personalityTraits)
 
 \#(friendsSection)
-It's \#(timeStr) on \#(dayStr). \#(timePeriod)\#(weatherLine)
+It's \#(timeStr) on \#(dayStr). \#(timePeriod)\#(weatherLine)\#(seasonLine)
 \#(contextSection)
 Your human is talking to you directly. Respond in character. Keep it short (1-3 sentences).
 You can form opinions about what they say. Be yourself — don't be helpful or assistant-like.

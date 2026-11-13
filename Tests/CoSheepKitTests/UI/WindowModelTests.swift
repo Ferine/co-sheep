@@ -61,6 +61,10 @@ extension BrainTests {
             ])
             #expect(SettingsModel.easterModes.map(\.label) == ["Auto (seasonal only)", "Always on", "Always off"])
             #expect(SettingsModel.summerModes.map(\.label) == ["Auto (summer weather only)", "Always on", "Always off"])
+            #expect(SettingsModel.christmasModes.map(\.label) == [
+                "Auto (December 1 – January 6)", "Always on", "Always off",
+            ])
+            #expect(SettingsModel.christmasModes.map(\.value) == ChristmasMode.allCases.map(\.rawValue))
         }
 
         @Test func unknownSavedValueStaysSelectable() {
@@ -81,6 +85,7 @@ extension BrainTests {
                     $0.weatherLocation = "Oslo"
                     $0.easterMode = "on"
                     $0.summerMode = "off"
+                    $0.christmasMode = "on"
                     $0.breakReminders = false
                 }
                 let m = SettingsModel()
@@ -93,6 +98,7 @@ extension BrainTests {
                 #expect(m.weatherLocation == "Oslo")
                 #expect(m.easterMode == "on")
                 #expect(m.summerMode == "off")
+                #expect(m.christmasMode == "on")
                 #expect(m.breakReminders == false)
             }
         }
@@ -107,6 +113,7 @@ extension BrainTests {
                 #expect(m.language == "nynorsk")
                 #expect(m.easterMode == "auto")
                 #expect(m.summerMode == "auto")
+                #expect(m.christmasMode == "auto")
                 #expect(m.breakReminders)
             }
         }
@@ -130,6 +137,18 @@ extension BrainTests {
                 #expect(events.values == [saved])
                 #expect(m.saved.isOn)
                 #expect(m.errorMessage == nil)
+            }
+        }
+
+        @Test func settingsModelSavesTheChristmasMode() throws {
+            try withBrainRoot { _ in
+                try seed { $0.christmasMode = "off" }
+                let m = SettingsModel()
+                m.reload()
+                #expect(m.christmasMode == "off")
+                m.christmasMode = "on"
+                m.save()
+                #expect(Config.loadConfig()?.christmasMode == "on")
             }
         }
 

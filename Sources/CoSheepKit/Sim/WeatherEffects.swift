@@ -23,6 +23,18 @@ final class WeatherEffects {
 
     private(set) var particles: [Particle] = []
     private(set) var condition: String?
+    /// Christmas: gentle snowfall whenever the real weather isn't already
+    /// raining or snowing.
+    var festiveSnow = false
+    /// Milliseconds of heavy snow left (see `startFlurry`).
+    private(set) var flurryMs: Double = 0
+    /// What fell last frame: rain and snow move differently, so a switch
+    /// never carries particles over.
+    private var lastFalling: String?
+
+    static let SNOW_COUNT = 30
+    static let FESTIVE_SNOW_COUNT = 18
+    static let FLURRY_SNOW_COUNT = 70
 
     // MARK: SpriteKit state
 
@@ -53,10 +65,38 @@ final class WeatherEffects {
         particles = []
     }
 
+    /// Snow hard for a while, whatever the weather (a julekalender door
+    /// shook the snow globe).
+    func startFlurry(_ ms: Double) {
+        flurryMs = max(flurryMs, ms)
+    }
+
+    /// What is actually falling: a flurry, the real rain or snow, or festive snow.
+    var falling: String? {
+        if flurryMs > 0 { return "snow" }
+        if condition == "rain" || condition == "snow" { return condition }
+        return festiveSnow ? "snow" : condition
+    }
+
+    private var snowCount: Int {
+        if flurryMs > 0 { return Self.FLURRY_SNOW_COUNT }
+        return condition == "snow" ? Self.SNOW_COUNT : Self.FESTIVE_SNOW_COUNT
+    }
+
     func update(_ dt: Double, _ screenW: Double, _ screenH: Double) {
-        guard let condition, !condition.isEmpty, condition != "clear", condition != "cloudy" else { return }
+        flurryMs = max(0, flurryMs - dt)
+        let falling = self.falling
+        if falling != lastFalling {
+            lastFalling = falling
+            particles = []
+        }
+        guard let condition = falling, !condition.isEmpty, condition != "clear", condition != "cloudy" else { return }
 
         let dtSec = dt / 1000
+        // A flurry that ended leaves more flakes than the sky now holds:
+        // they leave at the bottom instead of coming back around.
+        var surplus = condition == "snow" ? max(0, particles.count - snowCount) : 0
+        var melted: [Int] = []
 
         if condition == "rain" {
             // Spawn rain particles
@@ -69,7 +109,8 @@ final class WeatherEffects {
                 particles.append(Particle(x: x, y: y, vx: vx, vy: vy, life: life))
             }
         } else if condition == "snow" {
-            while particles.count < 30 {
+            let count = snowCount
+            while particles.count < count {
                 let x = SimRandom.next() * screenW
                 let y = -10 - SimRandom.next() * 30
                 let vy = 20 + SimRandom.next() * 40
@@ -93,6 +134,11 @@ final class WeatherEffects {
 
             // Recycle particles that exit the bottom
             if p.y > screenH + 10 {
+                if surplus > 0 {
+                    surplus -= 1
+                    melted.append(i)
+                    continue
+                }
                 p.y = -10
                 p.x = SimRandom.next() * screenW
                 particles[i] = p
@@ -104,6 +150,7 @@ final class WeatherEffects {
             }
             particles[i] = p
         }
+        for i in melted.reversed() { particles.remove(at: i) }
     }
 
     // MARK: - SpriteKit rendering
@@ -153,7 +200,7 @@ final class WeatherEffects {
     /// everything when there is no rain/snow to show.
     func render() {
         guard let scene else { return }
-        guard let condition, !particles.isEmpty else {
+        guard let condition = falling, !particles.isEmpty else {
             root.isHidden = true
             return
         }

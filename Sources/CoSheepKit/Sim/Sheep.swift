@@ -61,6 +61,8 @@ final class Sheep {
     var walkTarget: Double?
     var drawOverlay: DrawOverlay?
     var seasonalOverlay: DrawOverlay?
+    /// The wardrobe accessories behind `drawOverlay` (see `setAccessories`).
+    private(set) var accessoryIds: [String] = []
 
     /// Agent-herd seam: asked first whenever an idle period ends. Return the
     /// next state + duration to steer the sheep, or nil for the normal
@@ -131,6 +133,17 @@ final class Sheep {
 
     func setEasterTheme(_ easterTheme: EasterThemeHooks?) {
         self.easterTheme = easterTheme
+    }
+
+    /// Dress the sheep in wardrobe accessories (replaces `drawOverlay`).
+    func setAccessories(_ ids: [String]) {
+        accessoryIds = ids
+        drawOverlay = createCompositeOverlay(ids)
+    }
+
+    /// Already has something on its head: seasonal hats stay off.
+    var wearsHeadwear: Bool {
+        accessoriesCoverHead(accessoryIds)
     }
 
     var groundY: Double {
@@ -985,8 +998,9 @@ final class Sheep {
         return false
     }
 
-    /// Map states to sprite sheet keys
-    private func getSpriteKey() -> String {
+    /// Map states to sprite sheet keys. (Internal: the head sits differently
+    /// on each sheet, and seasonal hats need to know where.)
+    func getSpriteKey() -> String {
         switch state {
         case .grabbed: "fall"
         case .petting: "sleep"
@@ -1055,6 +1069,57 @@ final class Sheep {
     }
 
     // MARK: Draw
+
+    /// The transform `draw` puts on the sprite in the current state (wiggle,
+    /// squash, spin, lean, flip), so an overlay drawn right after stays glued
+    /// to the body. Call between `ctx.save()` and `ctx.restore()`. Vibrate's
+    /// jitter is random per frame and is not reproduced.
+    func applyPose(_ ctx: Canvas) {
+        let cx = x + displaySize / 2
+        let cy = y + displaySize / 2
+        func about(_ px: Double, _ py: Double, _ body: () -> Void) {
+            ctx.translate(px, py)
+            body()
+            ctx.translate(-px, -py)
+        }
+        switch state {
+        case .grabbed:
+            about(cx, cy) { ctx.rotate(sin(stateTimer / 60) * 0.18) }
+        case .petting:
+            about(cx, cy) { ctx.rotate(sin(stateTimer / 300) * 0.05) }
+        case .bounce:
+            let squash = 1 + abs(vy) * 0.001
+            about(cx, y + displaySize) { ctx.scale(1 / squash, squash) }
+        case .spin:
+            about(cx, cy) { ctx.rotate((stateTimer / max(1, stateDuration)) * .pi * 2) }
+        case .backflip:
+            let progress = stateTimer / max(1, stateDuration)
+            ctx.translate(0, -sin(progress * .pi) * 80)
+            about(cx, cy) { ctx.rotate(-progress * .pi * 2) }
+        case .headshake:
+            ctx.translate(sin(stateTimer / 30) * 8, 0)
+        case .zoom:
+            about(cx, cy) {
+                ctx.rotate(facingRight ? -0.2 : 0.2)
+                ctx.scale(1.15, 0.9)
+            }
+        case .stampede:
+            about(cx, cy) {
+                ctx.rotate(facingRight ? -0.25 : 0.25)
+                ctx.scale(1.2, 0.85)
+            }
+        case .trampoline:
+            let squash = 1 + abs(vy) * 0.0006
+            about(cx, cy) {
+                ctx.rotate(trampolineFlipProgress * .pi * 2)
+                ctx.scale(1 / squash, squash)
+            }
+        case .stacked:
+            about(cx, cy) { ctx.rotate(sin(stateTimer / 300) * 0.08) }
+        default:
+            break
+        }
+    }
 
     func draw(_ ctx: Canvas) {
         let spriteKey = getSpriteKey()

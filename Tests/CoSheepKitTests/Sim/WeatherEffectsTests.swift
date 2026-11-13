@@ -273,3 +273,160 @@ struct WeatherEffectsRenderTests {
         }
     }
 }
+
+@Suite("festive snow", .serialized)
+struct FestiveSnowTests {
+    @Test func itSnowsLightlyWheneverTheRealWeatherIsDry() {
+        withSim(random: SimRandom.seeded(1)) {
+            let w = WeatherEffects()
+            #expect(w.falling == nil)
+            w.festiveSnow = true
+            #expect(w.falling == "snow")
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == WeatherEffects.FESTIVE_SNOW_COUNT)
+            #expect(w.particles.count == 18)
+
+            for dry in ["clear", "cloudy", "fog", ""] {
+                w.setCondition(dry)
+                #expect(w.falling == "snow", "\(dry)")
+                w.update(16, 1000, 800)
+                #expect(w.particles.count == 18, "\(dry)")
+                #expect(w.condition == dry) // the real weather is untouched
+            }
+        }
+    }
+
+    @Test func realRainAndRealSnowWin() {
+        withSim(random: SimRandom.seeded(2)) {
+            let w = WeatherEffects()
+            w.festiveSnow = true
+            w.setCondition("rain")
+            #expect(w.falling == "rain")
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 50)
+            #expect(w.particles.allSatisfy { $0.vy >= 300 })
+
+            w.setCondition("snow")
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == WeatherEffects.SNOW_COUNT) // a real snowfall is heavier
+        }
+    }
+
+    @Test func rainNeverTurnsIntoSnowflakes() {
+        withSim(random: SimRandom.seeded(3)) {
+            let w = WeatherEffects()
+            w.setCondition("rain")
+            w.update(16, 1000, 800)
+            w.festiveSnow = true // still raining: nothing changes
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 50)
+
+            w.setCondition("clear") // the rain stops, Christmas takes over
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 18)
+            #expect(w.particles.allSatisfy { $0.vy >= 20 && $0.vy < 60 })
+        }
+    }
+
+    @Test func turningItOffClearsTheSky() {
+        withSim(random: SimRandom.seeded(4)) {
+            let w = WeatherEffects()
+            w.festiveSnow = true
+            w.setCondition("clear")
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 18)
+            w.festiveSnow = false
+            #expect(w.falling == "clear")
+            w.update(16, 1000, 800)
+            #expect(w.particles.isEmpty)
+        }
+    }
+
+    @Test func aFlurrySnowsHardWhateverTheWeather() {
+        withSim(random: SimRandom.seeded(5)) {
+            let w = WeatherEffects()
+            w.startFlurry(1000)
+            #expect(w.falling == "snow")
+            w.update(16, 1000, 800)
+            #expect(w.flurryMs == 984)
+            #expect(w.particles.count == WeatherEffects.FLURRY_SNOW_COUNT)
+            #expect(w.particles.count == 70)
+
+            // It even snows over the rain, and the rain is back afterwards
+            let rainy = WeatherEffects()
+            rainy.setCondition("rain")
+            rainy.update(16, 1000, 800)
+            rainy.startFlurry(100)
+            rainy.update(16, 1000, 800)
+            #expect(rainy.falling == "snow" && rainy.particles.count == 70)
+            rainy.update(100, 1000, 800)
+            #expect(rainy.falling == "rain" && rainy.particles.count == 50)
+        }
+    }
+
+    @Test func flurriesExtendButNeverShorten() {
+        let w = WeatherEffects()
+        w.startFlurry(1000)
+        w.startFlurry(500)
+        #expect(w.flurryMs == 1000)
+        w.startFlurry(2000)
+        #expect(w.flurryMs == 2000)
+    }
+
+    @Test func afterAFlurryTheSurplusFlakesLeaveAtTheBottom() {
+        withSim(random: SimRandom.seeded(6)) {
+            let w = WeatherEffects()
+            w.festiveSnow = true
+            w.startFlurry(1000)
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 70)
+
+            // Just after the flurry: nobody has reached the bottom yet
+            for _ in 0..<70 { w.update(16, 1000, 800) }
+            #expect(w.flurryMs == 0 && w.falling == "snow")
+            #expect(w.particles.count == 70)
+
+            // The slowest flake needs ~42s to cross 800pt; give them a minute
+            var counts: Set<Int> = []
+            for _ in 0..<3750 {
+                w.update(16, 1000, 800)
+                counts.insert(w.particles.count)
+            }
+            #expect(w.particles.count == 18)
+            #expect(counts.min() == 18) // it thins out, it never dips below
+            for _ in 0..<3750 { w.update(16, 1000, 800) }
+            #expect(w.particles.count == 18) // and from then on flakes come back around
+        }
+    }
+
+    @Test func aFlurryOverADrySkyJustStops() {
+        withSim(random: SimRandom.seeded(7)) {
+            let w = WeatherEffects()
+            w.startFlurry(100)
+            w.update(16, 1000, 800)
+            #expect(w.particles.count == 70)
+            w.update(100, 1000, 800)
+            #expect(w.falling == nil && w.particles.isEmpty)
+        }
+    }
+
+    @Test func festiveSnowIsRenderedWithTheSnowSprites() {
+        withSim(random: SimRandom.seeded(8)) {
+            let scene = makeScene()
+            let w = WeatherEffects()
+            w.attach(to: scene)
+            w.festiveSnow = true
+            w.update(16, 1000, 800)
+            w.render()
+            #expect(!w.root.isHidden)
+            #expect(w.snowNodes.count == 18)
+            #expect(w.snowNodes.allSatisfy { !$0.isHidden })
+            #expect(w.rainNodes.isEmpty)
+
+            w.festiveSnow = false
+            w.update(16, 1000, 800)
+            w.render()
+            #expect(w.root.isHidden)
+        }
+    }
+}

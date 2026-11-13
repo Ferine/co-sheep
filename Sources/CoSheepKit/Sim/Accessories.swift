@@ -677,6 +677,12 @@ func getAccessoryDefs() -> [AccessoryDef] {
     AccessoryRegistry.ACCESSORIES
 }
 
+/// True when one of `ids` is headgear: a sheep that already wears a hat
+/// keeps it, seasonal hats go on bare heads only.
+func accessoriesCoverHead(_ ids: [String]) -> Bool {
+    AccessoryRegistry.ACCESSORIES.contains { $0.category == .head && ids.contains($0.id) }
+}
+
 /// Creates a composite DrawOverlay from a list of accessory IDs. Returns nil if none selected.
 func createCompositeOverlay(_ ids: [String]) -> DrawOverlay? {
     if ids.isEmpty { return nil }

@@ -35,7 +35,7 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 - **Reactive emotes** — when the main sheep gets AI commentary, nearby friends react ("WHAT", "Hmm.", "*pretends not to notice*")
 - **45+ conversation scripts** — personality-pair dialogues, time-aware morning/night exchanges, weather-aware banter, running gags
 - **AI-generated conversations** — 30% chance that friend pairs have unique on-device-generated dialogue instead of scripted lines
-- **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations, group sunbathing in summer
+- **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations, group sunbathing in summer, and at Christmas a walk around the tree and a gift exchange
 - **Notifications** — friends greet on launch, comment on nightfall, echo break reminders
 
 ### Friend Memory
@@ -147,6 +147,20 @@ That turns the sheep from "available" into "actually keeps you company."
 - **Weather** — set a city in settings and see rain or snow particles on screen; the AI references weather in commentary
 - **Break reminders** — after 45 min of continuous work, the sheep nudges you to take a break (personality-flavored)
 
+## Christmas
+
+From December 1 to January 6 (or whenever you force it in Settings) the desktop gets ready for jul:
+
+- **Decorations** — a garland of lights under the menu bar, a decorated tree with presents, snow drifts, and light snowfall whenever the real weather isn't already raining or snowing
+- **Nisseluer** — every sheep, agent lambs included, wears a Santa hat that stays on through spins and backflips; a sheep that already wears headgear from the wardrobe keeps its own
+- **Julekalender** — the main sheep opens one door a day until Christmas Eve, each with a line and a small surprise (a light show, a flurry, a trip to the tree…). Missed days are caught up a few minutes apart, and a door never opens to a locked or sleeping screen
+- **Gang rundt juletreet** — the flock circles the tree singing the old songs, with opinions about the number of verses
+- **Gift exchange** — everyone walks to a present under the tree and reacts in character
+- **Sleigh flyover** — the nisse crosses the sky behind two flying sheep and parachutes a present down; the one spectacle that also flies after dark
+- **Seasonal talk** — Christmas conversations and quips, and the on-device AI is told it's jul (the date, the days left until Christmas Eve, today's door), so commentary and chat can mention it
+
+The julekalender and the Christmas tallies persist in `~/.co-sheep/christmas.json`.
+
 ## Living Desktop
 
 The flock runs a social simulation — drama emerges from real relationship data, not scripts:
@@ -154,7 +168,7 @@ The flock runs a social simulation — drama emerges from real relationship data
 - **Drama engine** — relationships move through `neutral → warm → inseparable` or `tension → feud → reconciling` based on affinity, moods, and jealousy (pet one sheep too much and the others notice). Feuding sheep refuse group activities, storm apart, and snipe at each other; a mutual friend eventually attempts mediation.
 - **Spectacles** — rare desktop events (~at most one a day, guaranteed within three): a wolf scatters the flock, a UFO abducts someone, a traveling merchant gifts an accessory, a balloon drifts by, shearing day embarrasses everyone. Long feuds can erupt into a high-noon showdown; reconciliations end in a feast.
 - **App awareness** — the sheep see which app is frontmost (name only, no extra permissions, no AI calls) and react: instant quips on app switches, gossip about your measured habits ("Hour 3 in the terminal. Blink twice if you need help."), and break reminders that name the culprit app.
-- **Debug menu** — tray → Debug lets you summon any spectacle or force a feud on demand.
+- **Debug menu** — tray → Debug lets you summon any spectacle, force a feud, or try the Christmas activities and julekalender doors on demand.
 
 Drama state persists in `~/.co-sheep/drama.json`; spectacle timing in `~/.co-sheep/spectacles.json`.
 
@@ -192,6 +206,7 @@ Accessible from the macOS menu bar or tray icon:
 - **Language** — defaults to Nynorsk, with 10 language options
 - **Weather location** — city name for weather awareness and effects
 - **Summer Mode** — auto (June–August when the weather is clear and warm), always on, or off
+- **Christmas Mode** — auto (December 1 – January 6), always on, or off
 - **Break reminders** — toggle 45-min work break nudges
 
 Settings are stored at `~/.co-sheep/config.json`.

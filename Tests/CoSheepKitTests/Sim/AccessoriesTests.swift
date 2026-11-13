@@ -120,3 +120,16 @@ struct AccessoriesTests {
         #expect(bobbleY(at: 0) != bobbleY(at: 500 * .pi / 2))
     }
 }
+
+@Suite("headwear")
+struct HeadwearTests {
+    @Test func onlyHeadAccessoriesCoverTheHead() {
+        #expect(!accessoriesCoverHead([]))
+        #expect(!accessoriesCoverHead(["sunglasses", "scarf", "monocle", "cape"]))
+        #expect(accessoriesCoverHead(["scarf", "crown"]))
+        #expect(!accessoriesCoverHead(["no_such_thing"]))
+        for def in getAccessoryDefs() {
+            #expect(accessoriesCoverHead([def.id]) == (def.category == .head), "\(def.id)")
+        }
+    }
+}

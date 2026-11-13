@@ -65,6 +65,7 @@ nonisolated struct SheepConfig: Codable, Equatable {
     var breakReminders: Bool = true
     var easterMode: String = "auto"
     var summerMode: String = "auto"
+    var christmasMode: String = "auto"
     var weatherLocation: String = ""
     var accessories: [String] = []
     var mcpEnabled: Bool = true
@@ -92,6 +93,7 @@ nonisolated struct SheepConfig: Codable, Equatable {
         case breakReminders = "break_reminders"
         case easterMode = "easter_mode"
         case summerMode = "summer_mode"
+        case christmasMode = "christmas_mode"
         case weatherLocation = "weather_location"
         case accessories
         case mcpEnabled = "mcp_enabled"
@@ -115,6 +117,7 @@ nonisolated struct SheepConfig: Codable, Equatable {
         breakReminders = try c.decodeSerdeDefault(Bool.self, forKey: .breakReminders, default: true)
         easterMode = try c.decodeSerdeDefault(String.self, forKey: .easterMode, default: "auto")
         summerMode = try c.decodeSerdeDefault(String.self, forKey: .summerMode, default: "auto")
+        christmasMode = try c.decodeSerdeDefault(String.self, forKey: .christmasMode, default: "auto")
         weatherLocation = try c.decodeSerdeDefault(String.self, forKey: .weatherLocation, default: "")
         accessories = try c.decodeSerdeDefault([String].self, forKey: .accessories, default: [])
         mcpEnabled = try c.decodeSerdeDefault(Bool.self, forKey: .mcpEnabled, default: true)
@@ -194,5 +197,9 @@ enum Config {
 
     static func getEasterMode() -> String {
         loadConfig()?.easterMode ?? "auto"
+    }
+
+    static func getChristmasMode() -> ChristmasMode {
+        ChristmasMode(rawValue: loadConfig()?.christmasMode ?? "auto") ?? .auto
     }
 }

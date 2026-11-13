@@ -47,6 +47,48 @@ extension BrainTests {
             }
         }
 
+        @Test func theSeasonSectionFollowsTheWeatherAndIsAbsentByDefault() {
+            at(hour: 10) {
+                let season = "SEASON: It's Christmas time (jul)."
+                let plain = Personality.getSystemPrompt(recentJournal: "", weatherContext: "")
+                #expect(!plain.contains("SEASON"))
+                #expect(Personality.getSystemPrompt(recentJournal: "", weatherContext: "", seasonContext: "") == plain)
+
+                let p = Personality.getSystemPrompt(recentJournal: "", weatherContext: "", seasonContext: season)
+                #expect(p.contains("but don't force it.\n\n\(season)\nYou may reference Christmas naturally if relevant, but don't force it.\n\nNo diary entries yet"))
+
+                let both = Personality.getSystemPrompt(
+                    recentJournal: "", weatherContext: "WEATHER: Snow outside.", seasonContext: season)
+                #expect(both.contains("WEATHER: Snow outside.\nYou may reference the weather naturally if relevant, but don't force it.\n\n\(season)\nYou may reference Christmas naturally"))
+            }
+        }
+
+        @Test func theChatPromptGetsTheSeasonOnItsOwnLine() {
+            at(hour: 10) {
+                let season = "SEASON: It's Christmas time (jul)."
+                let plain = Personality.getChatPrompt(recentContext: "", weatherContext: "")
+                #expect(!plain.contains("SEASON"))
+                let p = Personality.getChatPrompt(
+                    recentContext: "", weatherContext: "WEATHER: Snow outside.", seasonContext: season)
+                #expect(p.contains("Peak productivity hours (in theory).\nWEATHER: Snow outside.\n\(season)\n"))
+            }
+        }
+
+        @Test func theSeasonContextFollowsTheSettingAndTheCalendar() throws {
+            // at(hour:) is July 4: out of season
+            try at(hour: 10) {
+                #expect(Personality.getSeasonContext() == "")
+                try Config.updateConfig { $0.christmasMode = "on" }
+                #expect(Personality.getSeasonContext().hasPrefix("SEASON: It's Christmas time (jul)."))
+                #expect(!Personality.getSeasonContext().contains("December"))
+            }
+            try withBrainRoot(now: localDate(2026, 12, 24, 18, 0)) { _ in
+                #expect(Personality.getSeasonContext().hasSuffix("It's Christmas Eve (julaften), the big night."))
+                try Config.updateConfig { $0.christmasMode = "off" }
+                #expect(Personality.getSeasonContext() == "")
+            }
+        }
+
         @Test func systemPromptTemplateBracesAreSingle() {
             at(hour: 10) {
                 let p = Personality.getSystemPrompt(recentJournal: "", weatherContext: "")

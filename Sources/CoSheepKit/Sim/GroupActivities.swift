@@ -1,10 +1,12 @@
 import Foundation
 
 // Ex-group-activities.ts: rare flock-wide activities (campfire circle, follow
-// the leader, sync bounce, huddle, Easter egg hunt, sunbathe). Pure sim: the
-// activities steer sheep by poking their state machine (the TS does the same
-// through `as any`) and draw nothing themselves — the Easter eggs come from
-// `EasterTheme`, everything else is the sheep's own draw code.
+// the leader, sync bounce, huddle, Easter egg hunt, sunbathe, and at Christmas
+// walking around the tree and the gift exchange). Pure sim: the activities
+// steer sheep by poking their state machine (the TS does the same through
+// `as any`) and draw nothing themselves — the Easter eggs come from
+// `EasterTheme`, the tree, presents and carol notes from `ChristmasTheme`,
+// everything else is the sheep's own draw code.
 
 /// The `{ sheep, bubble, personality? }` record every "look up a character by
 /// id" callback returns (ex-anonymous type in group-activities.ts /
@@ -26,6 +28,12 @@ nonisolated enum GroupActivityType: String, CaseIterable, Codable {
     case huddle
     case easterEggHunt = "easter_egg_hunt"
     case sunbathe
+    /// "Gang rundt juletreet": the flock circles the tree, singing.
+    case juletregang
+    case giftExchange = "gift_exchange"
+
+    /// The Christmas activities happen at the tree, not where the flock stood.
+    var gathersAtTree: Bool { self == .juletregang || self == .giftExchange }
 }
 
 nonisolated enum GroupActivityPhase: String, CaseIterable {
@@ -71,6 +79,14 @@ final class GroupActivity {
     var huntSummary: EasterHuntSummary?
     // Sunbathe state: countdown to the next lazy quip
     var quipTimer: Double?
+    // Juletregang state: countdown to the next sung line / drifting note,
+    // and how many lines were sung so far
+    var carolTimer: Double?
+    var noteTimer: Double?
+    var carolCount: Int?
+    // Gift exchange state
+    var giftAssignments: [String: Int]? // participant id → present index
+    var giftsOpened: Int?
 
     init(type: GroupActivityType, participants: [String], phase: GroupActivityPhase, timer: Double,
          duration: Double, centerX: Double) {
@@ -115,6 +131,64 @@ nonisolated enum GroupActivityData {
         "I carried this hunt.",
         "You're welcome, everyone.",
         "I deserve the golden grass.",
+    ]
+
+    // Juletregang: how far to either side of the tree the ring reaches
+    static let TREE_RING_RADIUS: Double = DISPLAY_SIZE * 1.6
+    /// A straggler further than this from the tree walks in before it joins.
+    static let TREE_GATHER_TIMEOUT_MS: Double = 20000
+    static let PRESENT_OPEN_RADIUS: Double = DISPLAY_SIZE * 0.35
+
+    /// First lines of the old songs for walking around the tree.
+    static let CAROL_LINES = [
+        "\u{266A} Så går vi rundt om en enebærbusk \u{266A}",
+        "\u{266A} O jul med din glede \u{266A}",
+        "\u{266A} På låven sitter nissen \u{266A}",
+        "\u{266A} Jeg gikk meg over sjø og land \u{266A}",
+        "\u{266A} Du grønne, glitrende tre, god dag \u{266A}",
+        "\u{266A} Jeg er så glad hver julekveld \u{266A}",
+    ]
+
+    /// What a sheep mutters between the verses.
+    static let CAROL_ASIDES: [String: [String]] = [
+        "snarky": ["I'm lip-syncing. Nobody tell.", "How many verses does this HAVE?", "We've passed this branch nine times."],
+        "wholesome": ["Everyone together now!", "This is my favorite part!", "Sing louder, I love it!"],
+        "chaotic": ["FASTER! SPIN THE TREE!", "I'M GOING THE WRONG WAY ON PURPOSE", "BAAA-LLELUJAH!"],
+        "passive-aggressive": ["No, no. I LOVE the seventh verse.", "Some of us are in tune. Just saying.", "Lovely. Really. Keep going."],
+        "good_colleague": ["Tidlig mandags morgen!", "Så gjør vi så når vi vasker vårt tøy", "En gang til!"],
+    ]
+
+    static let CAROL_GENERIC_ASIDES = [
+        "Left hoof, right hoof.",
+        "I'm getting dizzy.",
+        "Who's leading? Is anyone leading?",
+    ]
+
+    static let CAROL_FINALE_LINES = [
+        "God jul!",
+        "And that's the tree, circled.",
+        "Same time next year.",
+    ]
+
+    static let GIFT_QUIPS = [
+        "Socks! ...made of wool. Awkward.",
+        "A scarf. From whose wool?!",
+        "It's a tiny bell!",
+        "A marzipan pig. Nice.",
+    ]
+
+    static let GIFT_PERSONALITY_QUIPS: [String: [String]] = [
+        "snarky": ["Wool socks. Is this a threat?", "Regifted. I can tell.", "Oh good. Another candle."],
+        "wholesome": ["I love it! What is it?", "You remembered!", "Best present ever!"],
+        "chaotic": ["IT'S A BOX! I LOVE BOX!", "I ATE THE WRAPPING!", "MINE MINE MINE"],
+        "passive-aggressive": ["Oh. You shouldn't have. Really.", "It's... certainly a gift.", "I'll treasure it. Somewhere."],
+        "good_colleague": ["Marsipangris! Takk!", "Nok et slips. Flott.", "Kaffekopp. Akkurat det jeg ønsket meg."],
+    ]
+
+    static let GIFT_FINALE_LINES = [
+        "God jul, everyone!",
+        "Best. Julaften. Ever.",
+        "Same presents next year, then.",
     ]
 }
 
@@ -173,6 +247,10 @@ func createGroupActivity(_ type: GroupActivityType, _ participants: [String], _ 
     case .huddle: duration = huddle
     case .easterEggHunt: duration = easterEggHunt
     case .sunbathe: duration = sunbathe
+    // Not part of the TS record: rolled only when picked, so the older
+    // types keep their random sequence.
+    case .juletregang: duration = 20000 + SimRandom.next() * 8000
+    case .giftExchange: duration = 22000 + SimRandom.next() * 8000
     }
 
     let activity = GroupActivity(type: type, participants: participants, phase: .gathering, timer: 0,
@@ -188,15 +266,28 @@ func createGroupActivity(_ type: GroupActivityType, _ participants: [String], _ 
         activity.eggFinders = [:]
     }
     if type == .sunbathe { activity.quipTimer = 3000 }
+    if type == .juletregang {
+        activity.carolTimer = 600
+        activity.noteTimer = 300
+        activity.carolCount = 0
+    }
+    if type == .giftExchange {
+        activity.giftAssignments = [:]
+        activity.giftsOpened = 0
+    }
     return activity
 }
 
-func pickActivityType(_ easterTheme: EasterTheme? = nil, _ summerTheme: SummerTheme? = nil) -> GroupActivityType {
+func pickActivityType(_ easterTheme: EasterTheme? = nil, _ summerTheme: SummerTheme? = nil,
+                      _ christmasTheme: ChristmasTheme? = nil) -> GroupActivityType {
     if let easterTheme, easterTheme.active, SimRandom.next() < 0.4 {
         return .easterEggHunt
     }
     if let summerTheme, summerTheme.active, SimRandom.next() < 0.4 {
         return .sunbathe
+    }
+    if let christmasTheme, christmasTheme.active, SimRandom.next() < 0.5 {
+        return SimRandom.next() < 0.5 ? .juletregang : .giftExchange
     }
     let types: [GroupActivityType] = [.campfireCircle, .followLeader, .syncBounce, .huddle]
     return types[SimRandom.int(types.count)]
@@ -204,14 +295,14 @@ func pickActivityType(_ easterTheme: EasterTheme? = nil, _ summerTheme: SummerTh
 
 /// Returns true while activity is still running, false when done
 func updateGroupActivity(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,
-                         _ easterTheme: EasterTheme? = nil) -> Bool {
+                         _ easterTheme: EasterTheme? = nil, _ christmasTheme: ChristmasTheme? = nil) -> Bool {
     activity.timer += dt
 
     switch activity.phase {
     case .gathering:
-        return updateGathering(activity, dt, getSheep, easterTheme)
+        return updateGathering(activity, dt, getSheep, easterTheme, christmasTheme)
     case .performing:
-        return updatePerforming(activity, dt, getSheep, easterTheme)
+        return updatePerforming(activity, dt, getSheep, easterTheme, christmasTheme)
     case .celebrating:
         return updateCelebrating(activity, dt, getSheep, easterTheme)
     case .dispersing:
@@ -220,7 +311,7 @@ func updateGroupActivity(_ activity: GroupActivity, _ dt: Double, _ getSheep: Gr
 }
 
 private func updateGathering(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,
-                             _ easterTheme: EasterTheme?) -> Bool {
+                             _ easterTheme: EasterTheme?, _ christmasTheme: ChristmasTheme?) -> Bool {
     let DISPLAY_SIZE = GroupActivityData.DISPLAY_SIZE
     var allGathered = true
 
@@ -239,10 +330,16 @@ private func updateGathering(_ activity: GroupActivity, _ dt: Double, _ getSheep
         }
     }
 
-    // Timeout gathering after 8s — just start performing
-    if allGathered || activity.timer > 8000 {
+    // Timeout gathering after 8s — just start performing. The tree can be
+    // most of a screen away, so the Christmas activities wait longer.
+    let timeout = activity.type.gathersAtTree ? GroupActivityData.TREE_GATHER_TIMEOUT_MS : 8000
+    if allGathered || activity.timer > timeout {
         activity.phase = .performing
         activity.timer = 0
+
+        if activity.type == .giftExchange {
+            christmasTheme?.resetPresents()
+        }
 
         if activity.type == .easterEggHunt, let easterTheme {
             easterTheme.prepareHunt(activity.participants)
@@ -266,6 +363,10 @@ private func updateGathering(_ activity: GroupActivity, _ dt: Double, _ getSheep
             first?.bubble.show("Easter egg hunt!", duration: 3000)
         } else if activity.type == .sunbathe {
             first?.bubble.show("Sunbathing time!", duration: 3000)
+        } else if activity.type == .juletregang {
+            first?.bubble.show("Everyone around the tree!", duration: 3000)
+        } else if activity.type == .giftExchange {
+            first?.bubble.show("Presents!", duration: 3000)
         }
     }
 
@@ -273,7 +374,7 @@ private func updateGathering(_ activity: GroupActivity, _ dt: Double, _ getSheep
 }
 
 private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,
-                              _ easterTheme: EasterTheme?) -> Bool {
+                              _ easterTheme: EasterTheme?, _ christmasTheme: ChristmasTheme?) -> Bool {
     switch activity.type {
     case .campfireCircle:
         // First participant does campfire, others sit nearby
@@ -358,6 +459,15 @@ private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getShee
                 }
             }
         }
+
+    case .juletregang:
+        updateJuletregang(activity, dt, getSheep, christmasTheme)
+
+    case .giftExchange:
+        if updateGiftExchange(activity, dt, getSheep, christmasTheme) {
+            finishWithCheer(activity, getSheep, GroupActivityData.GIFT_FINALE_LINES)
+            return true
+        }
     }
 
     if activity.timer >= activity.duration {
@@ -365,10 +475,170 @@ private func updatePerforming(_ activity: GroupActivity, _ dt: Double, _ getShee
             finalizeHuntSummary(activity, easterTheme, false)
             easterTheme?.finishHunt()
         }
-        startDispersing(activity, getSheep)
+        if activity.type == .juletregang {
+            finishWithCheer(activity, getSheep, GroupActivityData.CAROL_FINALE_LINES)
+        } else {
+            startDispersing(activity, getSheep)
+        }
     }
 
     return true
+}
+
+/// The key the personality-flavoured line pools use: Good Colleague has his
+/// own pool even though he also has a regular personality.
+private func linePoolKey(_ id: String, _ entry: FlockCharacter) -> String {
+    id == "good_colleague" ? "good_colleague" : (entry.personality ?? "")
+}
+
+/// Everyone hops, one sheep gets the last word, then the flock wanders off.
+private func finishWithCheer(_ activity: GroupActivity, _ getSheep: GroupActivityLookup, _ lines: [String]) {
+    for id in activity.participants {
+        if let entry = getSheep(id) { entry.sheep.playAnimation(.bounce) }
+    }
+    if let speaker = activity.participants.first.flatMap({ getSheep($0) }) {
+        speaker.bubble.show(lines[SimRandom.int(lines.count)], duration: 3000)
+    }
+    startDispersing(activity, getSheep)
+}
+
+/// Gang rundt juletreet. Seen from the side, a ring around the tree is a
+/// file of sheep walking back and forth past it, half of them each way.
+private func updateJuletregang(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,
+                               _ christmasTheme: ChristmasTheme?) {
+    let radius = GroupActivityData.TREE_RING_RADIUS
+    var singers: [FlockCharacter] = []
+
+    for (index, id) in activity.participants.enumerated() {
+        guard let entry = getSheep(id) else { continue }
+        let sheep = entry.sheep
+        guard sheep.canBeDirected else { continue }
+        sheep.walkTarget = nil
+
+        let offset = sheep.x - activity.centerX
+        if offset > radius {
+            sheep.facingRight = false
+        } else if offset < -radius {
+            sheep.facingRight = true
+        } else if sheep.state != .walk {
+            // Joining (or back from a hop): every other sheep goes the other way round
+            sheep.facingRight = index % 2 == 0
+        }
+        if sheep.state != .walk {
+            poke(sheep, .walk, activity.duration)
+        }
+        if abs(offset) <= radius * 1.5 { singers.append(entry) }
+    }
+    if singers.isEmpty { return }
+
+    // A note drifts up from whoever is singing
+    if var noteTimer = activity.noteTimer {
+        noteTimer -= dt
+        if noteTimer <= 0 {
+            noteTimer = 450 + SimRandom.next() * 350
+            let sheep = singers[SimRandom.int(singers.count)].sheep
+            let headX = sheep.x + sheep.displaySize * (sheep.facingRight ? 0.8 : 0.2)
+            christmasTheme?.emitNote(headX, sheep.y + sheep.displaySize * 0.15)
+        }
+        activity.noteTimer = noteTimer
+    }
+
+    // Verses and mutterings take turns
+    if var carolTimer = activity.carolTimer {
+        carolTimer -= dt
+        if carolTimer <= 0 {
+            carolTimer = 4200 + SimRandom.next() * 1200
+            let count = activity.carolCount ?? 0
+            let id = activity.participants[count % activity.participants.count]
+            if let entry = getSheep(id), !entry.bubble.visible {
+                let lines = GroupActivityData.CAROL_LINES
+                let pool = count % 2 == 0
+                    ? [lines[(count / 2) % lines.count]]
+                    : GroupActivityData.CAROL_ASIDES[linePoolKey(id, entry)] ?? GroupActivityData.CAROL_GENERIC_ASIDES
+                entry.bubble.show(pool[SimRandom.int(pool.count)], duration: 3400)
+            }
+            activity.carolCount = count + 1
+        }
+        activity.carolTimer = carolTimer
+    }
+}
+
+/// One present each: walk to it, open it, react. Returns true once every
+/// present that was handed out has been opened.
+private func updateGiftExchange(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,
+                                _ christmasTheme: ChristmasTheme?) -> Bool {
+    guard let christmasTheme, var assignments = activity.giftAssignments else {
+        // No tree, no presents: just sit together until the time is up
+        sitTogether(activity, getSheep)
+        return false
+    }
+    let presents = christmasTheme.getPresentPositions()
+    if presents.isEmpty {
+        sitTogether(activity, getSheep)
+        return false
+    }
+
+    // Hand out the presents once: nearest one that is still free
+    if assignments.isEmpty {
+        var free = presents.enumerated().filter { !$0.element.opened }.map { (index: $0.offset, x: $0.element.x) }
+        for id in activity.participants {
+            guard !free.isEmpty, let entry = getSheep(id) else { continue }
+            let center = entry.sheep.x + entry.sheep.displaySize / 2
+            var best = 0
+            for i in free.indices where abs(free[i].x - center) < abs(free[best].x - center) {
+                best = i
+            }
+            assignments[id] = free.remove(at: best).index
+        }
+        activity.giftAssignments = assignments
+        if assignments.isEmpty { return false }
+    }
+
+    var waiting = 0
+    for id in activity.participants {
+        guard let entry = getSheep(id) else { continue }
+        guard let index = assignments[id], presents.indices.contains(index), !presents[index].opened else {
+            // Opened theirs (or there was none left): sit and admire it
+            if entry.sheep.state != .sit && entry.sheep.state != .idle {
+                direct(entry.sheep, .sit, activity.duration)
+            }
+            continue
+        }
+        waiting += 1
+
+        let present = presents[index]
+        let sheepCenter = entry.sheep.x + entry.sheep.displaySize / 2
+        if abs(sheepCenter - present.x) < GroupActivityData.PRESENT_OPEN_RADIUS {
+            christmasTheme.openPresent(index)
+            activity.giftsOpened = (activity.giftsOpened ?? 0) + 1
+            waiting -= 1
+            entry.sheep.playAnimation(.bounce)
+            let pool = GroupActivityData.GIFT_PERSONALITY_QUIPS[linePoolKey(id, entry)] ?? GroupActivityData.GIFT_QUIPS
+            entry.bubble.show(pool[SimRandom.int(pool.count)], duration: 3000)
+            continue
+        }
+
+        // Steer by facing only, like the egg hunt: walkTarget's arrival
+        // radius is far larger than the reach of a present
+        entry.sheep.walkTarget = nil
+        entry.sheep.facingRight = present.x > sheepCenter
+        let state = entry.sheep.state
+        if state == .idle || state == .sit || state == .idleSleep || state == .idleCampfire ||
+            state == .idleCounting || state == .idleEggPainting {
+            direct(entry.sheep, .walk, 15000)
+        }
+    }
+
+    return waiting == 0
+}
+
+private func sitTogether(_ activity: GroupActivity, _ getSheep: GroupActivityLookup) {
+    for id in activity.participants {
+        guard let entry = getSheep(id) else { continue }
+        if entry.sheep.state != .sit && entry.sheep.state != .idle {
+            direct(entry.sheep, .sit, activity.duration)
+        }
+    }
 }
 
 private func updateCelebrating(_ activity: GroupActivity, _ dt: Double, _ getSheep: GroupActivityLookup,

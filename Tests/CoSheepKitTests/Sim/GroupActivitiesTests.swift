@@ -741,3 +741,336 @@ struct EasterEggHuntTests {
         #expect(stage.sheep(hunter).state == .walk)
     }
 }
+
+@Suite("christmas group activities", .serialized)
+struct ChristmasGroupActivityTests {
+    private let december = localMs(2026, 12, 13)
+
+    /// An activity that is already performing (the gathering is tested on its own).
+    private func performing(_ type: GroupActivityType, _ stage: Stage, center: Double = 700) -> GroupActivity {
+        let activity = withSeed(1) { createGroupActivity(type, stage.ids, center) }
+        activity.phase = .performing
+        activity.timer = 0
+        return activity
+    }
+
+    @Test func theTreeActivitiesHaveTheirOwnTypes() {
+        #expect(GroupActivityType.juletregang.rawValue == "juletregang")
+        #expect(GroupActivityType.giftExchange.rawValue == "gift_exchange")
+        #expect(GroupActivityType.allCases.filter(\.gathersAtTree) == [.juletregang, .giftExchange])
+    }
+
+    @Test func theyRollTheirOwnDurationOnTopOfTheSharedOnes() {
+        for type in [GroupActivityType.juletregang, .giftExchange] {
+            var count = 0
+            let saved = SimRandom.source
+            SimRandom.source = { count += 1; return 0.5 }
+            _ = createGroupActivity(type, ["a", "b", "c"], 0)
+            SimRandom.source = saved
+            #expect(count == 6, "\(type)")
+        }
+        let expected: [(GroupActivityType, ClosedRange<Double>)] = [
+            (.juletregang, 20000...28000), (.giftExchange, 22000...30000),
+        ]
+        for (type, range) in expected {
+            let low = withRandom([0]) { createGroupActivity(type, ["a", "b"], 500) }
+            let high = withRandom([0.999999]) { createGroupActivity(type, ["a", "b"], 500) }
+            #expect(low.duration == range.lowerBound, "\(type)")
+            #expect(high.duration > range.upperBound - 1 && high.duration < range.upperBound, "\(type)")
+        }
+    }
+
+    @Test func theyStartWithTheirOwnState() {
+        let ring = withSeed(1) { createGroupActivity(.juletregang, ["a", "b"], 0) }
+        #expect(ring.carolTimer == 600 && ring.noteTimer == 300 && ring.carolCount == 0)
+        #expect(ring.giftAssignments == nil && ring.giftsOpened == nil)
+
+        let gifts = withSeed(1) { createGroupActivity(.giftExchange, ["a", "b"], 0) }
+        #expect(gifts.giftAssignments == [:] && gifts.giftsOpened == 0)
+        #expect(gifts.carolTimer == nil)
+    }
+
+    @Test func pickActivityTypeRollsForChristmasAfterTheOtherSeasons() {
+        withSim(now: december) {
+            let christmas = ChristmasTheme(W, H)
+            withRandom([0.49, 0.49]) { #expect(pickActivityType(nil, nil, christmas) == .juletregang) }
+            withRandom([0.49, 0.5]) { #expect(pickActivityType(nil, nil, christmas) == .giftExchange) }
+            // The Christmas roll fails (0.5 is not < 0.5): a standard type.
+            withRandom([0.5, 0.0]) { #expect(pickActivityType(nil, nil, christmas) == .campfireCircle) }
+            christmas.setModeOverride(.off)
+            // Off: no roll is consumed, the first one picks the type.
+            withRandom([0.99]) { #expect(pickActivityType(nil, nil, christmas) == .huddle) }
+        }
+    }
+
+    @Test func theFlockGetsTwentySecondsToReachTheTree() {
+        let stage = Stage([("a", 0), ("b", 60), ("c", 120)])
+        let activity = withSeed(1) { createGroupActivity(.juletregang, stage.ids, 1000) }
+        for _ in 0..<1250 { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(activity.phase == .gathering) // 20000ms: not yet (> 20000)
+        _ = updateGroupActivity(activity, 16, stage.lookup)
+        #expect(activity.phase == .performing)
+        #expect(stage.bubble("a").currentText == "Everyone around the tree!")
+    }
+
+    @Test func theGiftExchangeAnnouncesThePresents() {
+        let stage = Stage([("a", 640), ("b", 700), ("c", 760)])
+        let activity = withSeed(1) { createGroupActivity(.giftExchange, stage.ids, 700) }
+        _ = updateGroupActivity(activity, 16, stage.lookup)
+        #expect(activity.phase == .performing)
+        #expect(stage.bubble("a").currentText == "Presents!")
+    }
+
+    // MARK: juletregang
+
+    @Test func theRingWalksBothWaysAndTurnsAtItsEdges() {
+        // Ring radius: 1.6 display sizes = 153.6
+        let stage = Stage([("a", 700), ("b", 720), ("c", 740), ("far", 900), ("left", 500)])
+        let activity = performing(.juletregang, stage)
+        withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+
+        // Inside the ring every other sheep sets off the other way round
+        #expect(stage.sheep("a").facingRight == true)
+        #expect(stage.sheep("b").facingRight == false)
+        #expect(stage.sheep("c").facingRight == true)
+        // Outside it they walk in
+        #expect(stage.sheep("far").facingRight == false)
+        #expect(stage.sheep("left").facingRight == true)
+        for id in stage.ids {
+            #expect(stage.sheep(id).state == .walk, "\(id)")
+            #expect(stage.sheep(id).stateDuration == activity.duration)
+            #expect(stage.sheep(id).walkTarget == nil)
+        }
+
+        // Past the edge: turn back. Inside and already walking: keep going.
+        stage.sheep("a").x = 700 + 154
+        stage.sheep("b").x = 700 - 154
+        stage.sheep("c").facingRight = false
+        withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(stage.sheep("a").facingRight == false)
+        #expect(stage.sheep("b").facingRight == true)
+        #expect(stage.sheep("c").facingRight == false)
+    }
+
+    @Test func aSheepTheHumanIsHoldingIsLeftAlone() {
+        let stage = Stage([("a", 700), ("b", 720)])
+        stage.sheep("b").state = .grabbed
+        stage.sheep("b").walkTarget = 42
+        let activity = performing(.juletregang, stage)
+        withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(stage.sheep("a").state == .walk)
+        #expect(stage.sheep("b").state == .grabbed)
+        #expect(stage.sheep("b").walkTarget == 42)
+    }
+
+    @Test func versesAndMutteringsTakeTurnsAroundTheRing() throws {
+        let stage = Stage([("main", 700), ("good_colleague", 720), ("c", 740)],
+                          personalities: ["good_colleague": "snarky", "c": "chaotic"])
+        let activity = performing(.juletregang, stage)
+
+        func beat() {
+            for id in stage.ids { stage.bubble(id).hide() }
+            activity.carolTimer = 1
+            withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        }
+        beat() // verse 1, first sheep
+        #expect(stage.bubble("main").currentText == "\u{266A} Så går vi rundt om en enebærbusk \u{266A}")
+        #expect(activity.carolCount == 1)
+        #expect(activity.carolTimer == 4200)
+        beat() // Good Colleague mutters from his own pool, whatever his personality
+        #expect(stage.bubble("good_colleague").currentText == "Tidlig mandags morgen!")
+        beat() // verse 2, third sheep
+        #expect(stage.bubble("c").currentText == "\u{266A} O jul med din glede \u{266A}")
+        beat() // the main sheep has no personality: generic muttering
+        #expect(stage.bubble("main").currentText == "Left hoof, right hoof.")
+        beat()
+        #expect(stage.bubble("good_colleague").currentText == "\u{266A} På låven sitter nissen \u{266A}")
+        beat()
+        #expect(stage.bubble("c").currentText == "FASTER! SPIN THE TREE!")
+        #expect(activity.carolCount == 6)
+    }
+
+    @Test func aSheepThatIsAlreadyTalkingSkipsItsLine() {
+        let stage = Stage([("a", 700), ("b", 720)])
+        let activity = performing(.juletregang, stage)
+        stage.bubble("a").show("busy talking", duration: 60_000)
+        activity.carolTimer = 1
+        withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(stage.bubble("a").currentText == "busy talking")
+        #expect(activity.carolCount == 1) // the turn passes on
+    }
+
+    @Test func notesRiseFromASingersHead() {
+        withSim(now: december) {
+            let theme = ChristmasTheme(W, H)
+            let stage = Stage([("a", 700), ("b", 720)])
+            let activity = performing(.juletregang, stage)
+            withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+            #expect(theme.notes.isEmpty) // 300ms until the first one
+
+            activity.noteTimer = 1
+            withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+            #expect(theme.notes.count == 1)
+            // Singer 0 faces right: its head is at 80% of the sprite
+            let a = stage.sheep("a")
+            #expect(abs(theme.notes[0].x - (a.x + DS * 0.8)) < 1e-9)
+            #expect(abs(theme.notes[0].y - (a.y + DS * 0.15)) < 1e-9)
+            #expect(activity.noteTimer == 450)
+        }
+    }
+
+    @Test func nobodySingsUntilSomeoneIsAtTheTree() {
+        let stage = Stage([("a", 100), ("b", 160)])
+        let activity = performing(.juletregang, stage, center: 1000)
+        activity.carolTimer = 1
+        withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(activity.carolCount == 0)
+        #expect(!stage.bubble("a").visible)
+        #expect(stage.sheep("a").state == .walk && stage.sheep("a").facingRight)
+    }
+
+    @Test func theCircleEndsWithACheerAndDisperses() {
+        let stage = Stage([("a", 700), ("b", 720), ("c", 740)])
+        let activity = performing(.juletregang, stage)
+        activity.timer = activity.duration - 16
+        withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup) }
+        #expect(activity.phase == .dispersing)
+        #expect(activity.timer == 0)
+        #expect(stage.bubble("a").currentText == "God jul!")
+        for id in stage.ids {
+            #expect(stage.sheep(id).state == .bounce, "\(id)")
+            #expect(stage.sheep(id).walkTarget != nil)
+        }
+    }
+
+    // MARK: gift exchange (W = 1512: the tree stands at 1058, presents at 968 992 1016 1102 1126 1150)
+
+    @Test func everyoneWalksToTheNearestFreePresent() {
+        withSim(now: december) {
+            let theme = ChristmasTheme(W, H)
+            // Sheep centers: 748, 1058, 1348
+            let stage = Stage([("a", 700), ("b", 1010), ("c", 1300)])
+            let activity = performing(.giftExchange, stage, center: theme.treeX - DS / 2)
+            withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+
+            #expect(activity.giftAssignments == ["a": 0, "b": 2, "c": 5])
+            #expect(stage.sheep("a").facingRight == true)
+            #expect(stage.sheep("b").facingRight == false)
+            #expect(stage.sheep("c").facingRight == false)
+            for id in stage.ids {
+                #expect(stage.sheep(id).state == .walk, "\(id)")
+                #expect(stage.sheep(id).walkTarget == nil)
+            }
+            #expect(activity.giftsOpened == 0)
+            #expect(theme.presents.allSatisfy { !$0.opened })
+        }
+    }
+
+    @Test func twoSheepNeverShareAPresent() {
+        withSim(now: december) {
+            let theme = ChristmasTheme(W, H)
+            // All three are nearest to the same present
+            let stage = Stage([("a", 600), ("b", 610), ("c", 620)])
+            let activity = performing(.giftExchange, stage, center: theme.treeX - DS / 2)
+            withRandom([0.5]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+            #expect(activity.giftAssignments == ["a": 0, "b": 1, "c": 2])
+        }
+    }
+
+    @Test func reachingAPresentOpensItWithAQuip() {
+        withSim(now: december) {
+            let theme = ChristmasTheme(W, H)
+            // a's center (968) is on the first present; b is far away
+            let stage = Stage([("a", 920), ("b", 300)], personalities: ["a": "snarky"])
+            let activity = performing(.giftExchange, stage, center: theme.treeX - DS / 2)
+            withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+
+            #expect(theme.presents[0].opened)
+            #expect(activity.giftsOpened == 1)
+            #expect(stage.sheep("a").state == .bounce)
+            #expect(stage.bubble("a").currentText == "Wool socks. Is this a threat?")
+            #expect(activity.phase == .performing) // b is still on its way
+            #expect(stage.sheep("b").state == .walk)
+        }
+    }
+
+    @Test func giftQuipsFollowThePersonality() {
+        withSim(now: december) {
+            let cases: [(id: String, personality: String?, quip: String)] = [
+                ("good_colleague", "snarky", "Marsipangris! Takk!"),
+                ("w", "wholesome", "I love it! What is it?"),
+                ("p", "passive-aggressive", "Oh. You shouldn't have. Really."),
+                ("main", nil, "Socks! ...made of wool. Awkward."),
+            ]
+            for (id, personality, quip) in cases {
+                let theme = ChristmasTheme(W, H)
+                let stage = Stage([(id, 920), ("other", 300)], personalities: personality.map { [id: $0] } ?? [:])
+                let activity = performing(.giftExchange, stage, center: theme.treeX - DS / 2)
+                withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+                #expect(stage.bubble(id).currentText == quip, "\(id)")
+            }
+        }
+    }
+
+    @Test func theExchangeEndsOnceEveryPresentHandedOutIsOpen() {
+        withSim(now: december) {
+            let theme = ChristmasTheme(W, H)
+            // Both already stand on their presents (968 and 1102)
+            let stage = Stage([("a", 920), ("b", 1054)])
+            let activity = performing(.giftExchange, stage, center: theme.treeX - DS / 2)
+            withRandom([0]) { _ = updateGroupActivity(activity, 16, stage.lookup, nil, theme) }
+            #expect(activity.giftAssignments == ["a": 0, "b": 3])
+            #expect(activity.giftsOpened == 2)
+            #expect(activity.phase == .dispersing)
+            #expect(stage.bubble("a").currentText == "God jul, everyone!")
+            #expect(stage.sheep("a").walkTarget != nil && stage.sheep("b").walkTarget != nil)
+        }
+    }
+
+    @Test func aRealFlockWalksOverOpensEverythingAndFinishesEarly() {
+        withSim(now: december, random: SimRandom.seeded(3)) {
+            let theme = ChristmasTheme(W, H)
+            let stage = Stage([("a", 700), ("b", 1010), ("c", 1300)])
+            let activity = createGroupActivity(.giftExchange, stage.ids, theme.treeX - DS / 2)
+            var frames = -1
+            for frame in 1...6000 {
+                for id in stage.ids { stage.sheep(id).update(16) }
+                theme.update(16)
+                if !updateGroupActivity(activity, 16, stage.lookup, nil, theme) {
+                    frames = frame
+                    break
+                }
+            }
+            #expect(frames > 0)
+            #expect(activity.giftsOpened == 3)
+            #expect(theme.presents.filter(\.opened).count == 3)
+            // Well before the 22s+ time limit: gathering, a short walk, 3s of dispersal
+            #expect(Double(frames) * 16 < activity.duration)
+        }
+    }
+
+    @Test func withoutATreeEveryoneSitsItOut() {
+        let stage = Stage([("a", 640), ("b", 700), ("c", 760)])
+        let activity = withSeed(11) { createGroupActivity(.giftExchange, stage.ids, 700) }
+        stage.sheep("a").state = .walk
+        _ = updateGroupActivity(activity, 16, stage.lookup) // → performing
+        _ = updateGroupActivity(activity, 16, stage.lookup)
+        #expect(stage.sheep("a").state == .sit)
+        #expect(activity.giftsOpened == 0)
+
+        let frames = run(activity, stage)
+        let expected = (activity.duration + 3000) / 16
+        #expect(Double(frames) >= expected - 4 && Double(frames) <= expected + 4)
+        #expect(activity.phase == .dispersing)
+    }
+
+    @Test func theTreeActivitiesRunToCompletionWithoutATheme() {
+        for type in [GroupActivityType.juletregang, .giftExchange] {
+            let stage = Stage([("a", 640), ("b", 700), ("c", 760)])
+            let activity = withSeed(11) { createGroupActivity(type, stage.ids, 700) }
+            let frames = withSeed(12) { run(activity, stage) }
+            #expect(frames > 0, "\(type) never finished")
+            #expect(activity.phase == .dispersing)
+        }
+    }
+}

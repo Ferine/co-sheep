@@ -117,6 +117,7 @@ struct ConversationsTests {
             ConversationContext(easterTheme: easter, recentEasterHunt: true),
             ConversationContext(easterTheme: easter, eggPaintingActive: true),
             ConversationContext(summerActive: true),
+            ConversationContext(christmasActive: true),
         ]
         let pairs = [("a", "b"), ("main", "a"), ("a", "main"), ("good_colleague", "a"), ("a", "good_colleague"),
                      ("main", "good_colleague")]
@@ -236,6 +237,36 @@ struct ConversationsTests {
         #expect(poolSize([pass, 0.1], "good_colleague", "b", c) == 3)
         // 25% gate
         #expect(firstLine([pass, 0.25, pass, 0.0], "a", "b", c) == "Baaaa?")
+    }
+
+    // MARK: christmas
+
+    @Test func christmasScripts() {
+        let c = ConversationContext(hour: 12, christmasActive: true)
+        #expect(firstLine([pass, 0.1, 0.0], "a", "b", c) == "What do the humans eat at Christmas?")
+        #expect(poolSize([pass, 0.1], "a", "b", c) == 7)
+        #expect(firstLine([pass, 0.1, 0.0], "good_colleague", "b", c) == "Julebord på fredag.")
+        #expect(poolSize([pass, 0.1], "good_colleague", "b", c) == 5)
+        // 30% gate
+        #expect(firstLine([pass, 0.3, pass, 0.0], "a", "b", c) == "Baaaa?")
+        // Off: the gate isn't rolled at all
+        #expect(firstLine([pass, pass, 0.0], "a", "b", ConversationContext(hour: 12)) == "Baaaa?")
+    }
+
+    @Test func goodColleagueSpeaksInEveryChristmasScriptOfHis() {
+        let c = ConversationContext(hour: 12, christmasActive: true)
+        for step in 0..<5 {
+            let script = withRandom([pass, 0.1, Double(step) / 5 + 0.01]) { pickConversation("a", "good_colleague", c) }
+            #expect(script?.contains { $0.speakerId == "good_colleague" } == true)
+            #expect(script?.contains { $0.speakerId == "a" } == true)
+        }
+    }
+
+    @Test func summerIsAskedBeforeChristmasWhenBothAreForcedOn() {
+        let c = ConversationContext(hour: 12, summerActive: true, christmasActive: true)
+        #expect(firstLine([pass, 0.1, 0.0], "a", "b", c) == "Is it just me or is the sun EXTRA today?")
+        // The summer roll misses, the Christmas roll hits
+        #expect(firstLine([pass, 0.25, 0.1, 0.0], "a", "b", c) == "What do the humans eat at Christmas?")
     }
 
     // MARK: weather

@@ -211,6 +211,12 @@ private final class EventLog {
     }
 }
 
+/// Local wall-clock epoch ms in December 2026 (the Christmas event is on then).
+private func decemberMs(_ day: Int, hour: Int = 12, minute: Int = 0) -> Double {
+    Calendar.current.date(from: DateComponents(year: 2026, month: 12, day: day, hour: hour, minute: minute))!
+        .timeIntervalSince1970 * 1000
+}
+
 /// How the spectacle scheduler starts out.
 private enum SchedulerStart {
     /// A spectacle "fired" in the far future: the 20h minimum gap holds forever,
@@ -1685,6 +1691,7 @@ struct FlockGroupActivityTests {
             let flock = makeFlock(friends: [friend("a")])
             cluster(flock, gap: 80)
             if type == .easterEggHunt { flock.setEasterMode(.on) }
+            if type.gathersAtTree { flock.setChristmasMode(.on) }
             world.autoHideMs = 50
             let ids = ["main", "good_colleague", "a"]
             flock.groupActivity = createGroupActivity(type, ids, 720)
@@ -2133,7 +2140,8 @@ struct FlockDrawTests {
             landed(flock)
             let canvas = frame(flock)
             #expect(canvas.groups.map(\.key) == [
-                "easter:bg", "summer:bg", "easter:mid", "summer:mid", "sheep:main", "easter:fg", "summer:fg",
+                "easter:bg", "summer:bg", "christmas:bg", "easter:mid", "summer:mid", "christmas:mid",
+                "sheep:main", "easter:fg", "summer:fg", "christmas:fg",
             ])
             #expect(canvas.groups.allSatisfy { $0.layer == .world })
             // Themes are off in September; the main sheep draws its sprite.
@@ -2326,9 +2334,10 @@ struct FlockSimulationTests {
     }
 
     private func runSimulation(seed: UInt64, hour: Int, minute: Int = 0, frames: Int = 20_000,
-                               chaos: Bool = false, themed: Bool = false) -> (spoke: Int, log: EventLog) {
+                               chaos: Bool = false, themed: Bool = false, christmas: Bool = false,
+                               inspect: ((Flock) -> Void)? = nil) -> (spoke: Int, log: EventLog) {
         withWorld(seed: seed, hour: hour) { world in
-            world.now = localMs(hour: hour, minute: minute)
+            world.now = christmas ? decemberMs(13, hour: hour) : localMs(hour: hour, minute: minute)
             let log = EventLog()
             let flock = makeFlock(friends: [
                 friend("amy", color: .pink, personality: .wholesome, scale: nil),
@@ -2344,6 +2353,7 @@ struct FlockSimulationTests {
             for frame in 1...frames {
                 if chaos { self.chaosEvent(frame, flock, world) }
                 if themed { self.themedEvent(frame, flock) }
+                if christmas { self.christmasEvent(frame, flock) }
                 world.step(flock)
                 if let problem = onScreen(flock) {
                     Issue.record("frame \(frame): \(problem)")
@@ -2361,7 +2371,18 @@ struct FlockSimulationTests {
                 }
             }
             _ = canvas
+            inspect?(flock)
             return (spoke, log)
+        }
+    }
+
+    /// The tree activities and the sleigh, forced at fixed frames of the Christmas run.
+    private func christmasEvent(_ frame: Int, _ flock: Flock) {
+        switch frame {
+        case 6000: flock.startChristmasActivity(.juletregang)
+        case 10000: flock.startChristmasActivity(.giftExchange)
+        case 14000: flock.startSpectacle(.sleigh)
+        default: break
         }
     }
 
@@ -2438,6 +2459,24 @@ struct FlockSimulationTests {
         #expect(result.log.weather.compactMap { $0 } == ["rain", "snow", "clear"])
     }
 
+    @Test func aDecemberRunWithTheWholeChristmasProgrammeKeepsEveryoneOnScreen() {
+        var stats = ChristmasStats()
+        var doorsOnDisk: [Int] = []
+        let result = runSimulation(seed: 12, hour: 13, christmas: true) { flock in
+            stats = flock.christmasStats
+            doorsOnDisk = ChristmasMemory.getStats().doorsOpened
+        }
+        #expect(result.spoke > 0)
+        // December 13 with an untouched calendar: 320s is time to catch up on the first two doors
+        #expect(stats.doorsOpened == [1, 2])
+        #expect(doorsOnDisk == [1, 2])
+        #expect(result.log.groupActivities.map(\.type).contains("juletregang"))
+        #expect(result.log.spectacleStarted.contains("sleigh"))
+        #expect(result.log.spectacleEnded.contains("sleigh"))
+        #expect(stats.carolsSungTotal >= 1)
+        #expect(stats.sleighsSeenTotal == 1)
+    }
+
     @Test func aChaoticTwentyThousandFramesWithEveryProvocationKeepsEveryoneOnScreen() {
         let result = runSimulation(seed: 5, hour: 12, chaos: true)
         #expect(result.spoke > 0)
@@ -2445,5 +2484,556 @@ struct FlockSimulationTests {
         // The scheduled spectacles that could start did (the stage is busy for long stretches).
         #expect(started.contains("wolf"))
         #expect(started.count == result.log.spectacleEnded.count || started.count == result.log.spectacleEnded.count + 1)
+    }
+}
+
+@Suite("christmas in the flock", .serialized)
+struct FlockChristmasTests {
+    private func frame(_ flock: Flock) -> Canvas {
+        let canvas = Canvas()
+        canvas.beginFrame()
+        flock.draw(canvas)
+        return canvas
+    }
+
+    private func ops(_ canvas: Canvas, _ key: String) -> [DrawOp] {
+        canvas.groups.first { $0.key == key }?.ops ?? []
+    }
+
+    /// A parked, quiet flock that woke up on December `day`.
+    private func christmasFlock(_ world: World, day: Int = 13, hour: Int = 12, friends: [FriendConfig] = [],
+                                scheduler: SchedulerStart = .quiet) -> Flock {
+        world.now = decemberMs(day, hour: hour)
+        let flock = makeFlock(friends: friends, scheduler: scheduler)
+        quietStage(flock)
+        return flock
+    }
+
+    private func dressed(_ id: String, _ accessories: [String]) -> FriendConfig {
+        FriendConfig(id: id, name: id.capitalized, color: .pink, personality: .wholesome,
+                     accessories: accessories, scale: 1)
+    }
+
+    // MARK: the season
+
+    @Test func decemberSwitchesTheSeasonOnAndTheSettingSwitchesItOff() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            #expect(flock.christmasTheme.active)
+            let keys = frame(flock).groups.map(\.key)
+            #expect(keys.contains("christmas:mid:tree"))
+            #expect(keys.contains("christmas:bg:garland:0"))
+            #expect(keys.contains("christmas:fg:hud"))
+
+            flock.setChristmasMode(.off)
+            #expect(!flock.christmasTheme.active)
+            #expect(!frame(flock).groups.contains { $0.key.hasPrefix("christmas:") && !$0.ops.isEmpty })
+        }
+        withWorld { _ in
+            let flock = makeFlock() // September
+            #expect(!flock.christmasTheme.active)
+            flock.setChristmasMode(.on)
+            #expect(flock.christmasTheme.active)
+        }
+    }
+
+    @Test func theGarlandHangsBelowTheMenuBar() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            flock.setTopInset(37)
+            #expect(flock.christmasTheme.topInset == 37)
+            #expect(frame(flock).groups.first { $0.key == "christmas:bg:garland:0" }?.anchor == CGPoint(x: 0, y: 40))
+            flock.setTopInset(-5) // an auto-hiding menu bar never reports less than nothing
+            #expect(flock.christmasTheme.topInset == 0)
+        }
+    }
+
+    @Test func itSnowsFestivelyUnlessItRainsForReal() throws {
+        try withWorld { world in
+            let scene = OverlayScene(size: CGSize(width: W, height: H))
+            scene.backingScale = 2
+            sceneKeepAlive.scenes.append(scene)
+            let flock = christmasFlock(world)
+            flock.attach(to: scene)
+            world.run(flock, frames: 3)
+            _ = frame(flock)
+            let weather = try #require(scene.weatherLayer.children.first)
+            #expect(!weather.isHidden)
+            #expect(weather.children.filter { !$0.isHidden }.count == WeatherEffects.FESTIVE_SNOW_COUNT)
+
+            flock.setWeatherCondition("rain")
+            world.run(flock, frames: 3)
+            _ = frame(flock)
+            #expect(weather.children.filter { !$0.isHidden }.count == 50)
+
+            flock.setWeatherCondition("clear")
+            flock.setChristmasMode(.off)
+            world.run(flock, frames: 3)
+            _ = frame(flock)
+            #expect(weather.isHidden)
+        }
+    }
+
+    // MARK: nisseluer
+
+    @Test func everyBareHeadGetsANisselue() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [dressed("crowned", ["crown"]), dressed("shades", ["sunglasses"])])
+            let on = frame(flock)
+            flock.setChristmasMode(.off)
+            let off = frame(flock)
+            @MainActor func hatOps(_ id: String) -> Int { ops(on, "sheep:\(id)").count - ops(off, "sheep:\(id)").count }
+            #expect(hatOps("main") == 4)
+            #expect(hatOps("good_colleague") == 4)
+            #expect(hatOps("shades") == 4) // sunglasses are not a hat
+            #expect(hatOps("crowned") == 0) // already wearing one
+        }
+    }
+
+    @Test func theWardrobeDecidesWhoWearsOne() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            let main = flock.main
+            let bare = ops(frame(flock), "sheep:main").count
+            #expect(!main.wearsHeadwear)
+
+            main.setAccessories(["party_hat"])
+            #expect(main.wearsHeadwear && main.accessoryIds == ["party_hat"])
+            let partyHat = ops(frame(flock), "sheep:main").count
+            main.setAccessories(["monocle"])
+            #expect(!main.wearsHeadwear)
+            let monocle = ops(frame(flock), "sheep:main").count
+            main.setAccessories([])
+            #expect(main.drawOverlay == nil)
+
+            flock.setChristmasMode(.off)
+            let plain = ops(frame(flock), "sheep:main").count
+            #expect(bare == plain + 4)
+            main.setAccessories(["party_hat"])
+            #expect(ops(frame(flock), "sheep:main").count == partyHat) // the party hat replaced the nisselue
+            main.setAccessories(["monocle"])
+            #expect(ops(frame(flock), "sheep:main").count == monocle - 4)
+        }
+    }
+
+    @Test func agentLambsWearThemToo() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            let lamb = landedLamb(flock.herd, lambSession("s1"))
+            stand(lamb)
+            let on = opCount(lamb)
+            flock.setChristmasMode(.off)
+            #expect(on == opCount(lamb) + 4)
+        }
+    }
+
+    @Test func theHatStaysOnTheHeadWhenTheSheepShakesIt() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            let main = flock.main
+            @MainActor func hat() -> CGRect {
+                ops(frame(flock), "sheep:main").suffix(4).reduce(CGRect.null) { $0.union($1.bounds) }
+            }
+            let still = hat()
+            // The cap sits above the head of a right-facing sheep: upper right of its 96pt box
+            #expect(still.minX >= 40 && still.maxX <= 90 && still.minY >= 6 && still.maxY <= 31)
+
+            main.state = .headshake
+            main.stateDuration = 800
+            main.stateTimer = 15 * .pi // sin(t / 30) = 1: the sprite is 8pt to the right
+            let shaken = hat()
+            #expect(abs(shaken.minX - (still.minX + 8)) < 0.01)
+            #expect(abs(shaken.minY - still.minY) < 0.01)
+
+            main.state = .sit // the head is two pixels lower on the sitting sprite
+            #expect(abs(hat().minY - (still.minY + 6)) < 0.01)
+        }
+    }
+
+    @Test func thePompomBobsWhileWalking() {
+        withWorld { world in
+            let flock = christmasFlock(world)
+            let main = flock.main
+            main.state = .walk
+            main.stateTimer = 0
+            let up = ops(frame(flock), "sheep:main").suffix(4).map(\.bounds)
+            main.stateTimer = 250
+            let down = ops(frame(flock), "sheep:main").suffix(4).map(\.bounds)
+            main.stateTimer = 500
+            let upAgain = ops(frame(flock), "sheep:main").suffix(4).map(\.bounds)
+            #expect(up != down)
+            #expect(up == upAgain)
+        }
+    }
+
+    // MARK: julekalender
+
+    private func openDoors(_ doors: ClosedRange<Int>) {
+        for door in doors { ChristmasMemory.openDoor(door) }
+    }
+
+    @Test func todaysDoorOpensOnceTheFlockHasSettled() throws {
+        try withWorld { world in
+            world.now = decemberMs(13)
+            openDoors(1...12)
+            let flock = christmasFlock(world)
+            // Twenty seconds for everyone to land and say hello: nothing yet
+            world.run(flock, frames: 1240)
+            #expect(flock.christmasStats.doorsOpened == Array(1...12)) // read from disk meanwhile
+            #expect(!flock.mainBubble.visible)
+
+            let frames = world.run(flock, maxFrames: 700) { flock.mainBubble.visible }
+            #expect(frames > 0)
+            #expect(flock.mainBubble.currentText == "Luke 13: Lucia! Where are my lussekatter?")
+            #expect(flock.christmasStats.doorsOpened == Array(1...13))
+            let onDisk = ChristmasMemory.getStats()
+            #expect(onDisk.doorsOpened == Array(1...13))
+            #expect(onDisk.lastDoorDate == "2026-12-13")
+            // What was behind it: Lucia is a festival of light
+            #expect(flock.christmasTheme.lightShowRunning)
+            #expect(flock.christmasTheme.hudVisible)
+            let journal = try String(
+                contentsOf: Paths.journal.appendingPathComponent("2026-12-13.md"), encoding: .utf8)
+            #expect(journal.contains("*Opened door 13 of the julekalender.*"))
+
+            // One door a day: nothing more however long the day gets
+            world.step(flock, 600_000)
+            world.run(flock, frames: 700)
+            #expect(flock.christmasStats.doorsOpened == Array(1...13))
+        }
+    }
+
+    @Test func missedDoorsAreCaughtUpOneEveryThreeMinutes() {
+        withWorld { world in
+            let flock = christmasFlock(world, day: 3)
+            #expect(world.run(flock, maxFrames: 2000) { flock.christmasStats.doorsOpened == [1] } > 0)
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 1: a chocolate."))
+            #expect(flock.main.state == .bounce) // door 1 makes it hop
+
+            for expected in [[1, 2], [1, 2, 3]] {
+                let before = world.now
+                #expect(world.run(flock, maxFrames: 16000) { flock.christmasStats.doorsOpened == expected } > 0)
+                let waited = world.now - before
+                #expect(waited >= Flock.DOOR_CATCH_UP_GAP_MS && waited < Flock.DOOR_CATCH_UP_GAP_MS + 60_000,
+                        "\(expected): \(waited)")
+            }
+            // December 3: door 4 stays shut until tomorrow
+            world.run(flock, frames: 14000)
+            #expect(flock.christmasStats.doorsOpened == [1, 2, 3])
+            #expect(ChristmasMemory.getStats().doorsOpened == [1, 2, 3])
+        }
+    }
+
+    @Test func aBoredMainSheepIsWokenUpToOpenItsDoor() {
+        withWorld { world in
+            world.now = decemberMs(13)
+            openDoors(1...12)
+            let flock = christmasFlock(world)
+            flock.main.state = .idleSleep // dozing off, as it does when nobody plays with it
+            let frames = world.run(flock, maxFrames: 1400) { flock.mainBubble.visible }
+            #expect(frames > 0)
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 13: "))
+            #expect(flock.main.state == .idle)
+        }
+    }
+
+    @Test func theDoorWaitsWhileTheMainSheepIsInTheHumansHands() {
+        withWorld { world in
+            world.now = decemberMs(13)
+            openDoors(1...12)
+            let flock = christmasFlock(world)
+            flock.main.state = .grabbed
+            world.run(flock, frames: 2500) // 40s
+            #expect(flock.christmasStats.doorsOpened == Array(1...12))
+            #expect(!flock.mainBubble.visible)
+
+            park(flock.main, x: 40)
+            #expect(world.run(flock, maxFrames: 400) { flock.christmasStats.doorsOpened.contains(13) } > 0)
+        }
+    }
+
+    @Test func theDoorWaitsUntilSomeoneIsBackAtTheScreen() {
+        withWorld { world in
+            world.now = decemberMs(13)
+            openDoors(1...12)
+            let flock = christmasFlock(world)
+            flock.setHumanAway(true) // locked, asleep, screen saver
+            world.run(flock, frames: 2500) // 40s
+            #expect(flock.christmasStats.doorsOpened == Array(1...12))
+
+            // Back: half a minute to sit down first
+            flock.setHumanAway(false)
+            world.run(flock, frames: 1850) // 29.6s
+            #expect(flock.christmasStats.doorsOpened == Array(1...12))
+            #expect(world.run(flock, maxFrames: 700) { flock.christmasStats.doorsOpened.contains(13) } > 0)
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 13: "))
+
+            // Being present all along costs nothing
+            flock.setHumanAway(false)
+        }
+    }
+
+    @Test func theDoorWaitsForTheStage() {
+        withWorld { world in
+            world.now = decemberMs(13)
+            openDoors(1...12)
+            let flock = christmasFlock(world)
+            world.autoHideMs = nil
+            flock.mainBubble.show("mid-sentence", duration: 600_000)
+            world.run(flock, frames: 2500)
+            #expect(flock.mainBubble.currentText == "mid-sentence")
+            #expect(flock.christmasStats.doorsOpened == Array(1...12))
+
+            flock.mainBubble.hide()
+            #expect(world.run(flock, maxFrames: 400) { flock.christmasStats.doorsOpened.contains(13) } > 0)
+        }
+    }
+
+    @Test func thereAreNoDoorsOutsideTheSeasonEvenWhenForcedOn() {
+        withWorld { world in
+            let flock = makeFlock() // September
+            quietStage(flock)
+            flock.setChristmasMode(.on)
+            world.run(flock, frames: 4000)
+            #expect(flock.christmasStats.doorsOpened.isEmpty)
+            #expect(!flock.mainBubble.visible)
+        }
+    }
+
+    @Test func afterChristmasEveTheRestOfTheCalendarCanStillBeCaughtUp() {
+        withWorld { world in
+            world.now = decemberMs(28)
+            openDoors(1...23)
+            let flock = christmasFlock(world, day: 28)
+            #expect(world.run(flock, maxFrames: 2000) { flock.christmasStats.doorsOpened.count == 24 } > 0)
+            #expect(flock.mainBubble.currentText == "Luke 24: God jul! Now look up.")
+            #expect(flock.spectacle?.type == .sleigh)
+        }
+    }
+
+    @Test func previewingDoorsWalksTheCalendarWithoutOpeningIt() throws {
+        try withWorld { world in
+            let scene = OverlayScene(size: CGSize(width: W, height: H))
+            scene.backingScale = 2
+            sceneKeepAlive.scenes.append(scene)
+            let flock = christmasFlock(world, friends: [friend("a")])
+            flock.attach(to: scene)
+            flock.participantFilter = nil
+            world.autoHideMs = nil
+
+            flock.previewNextDoor() // 1: a hop
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 1: "))
+            #expect(flock.main.state == .bounce)
+            park(flock.main)
+
+            flock.previewNextDoor() // 2: the light show
+            #expect(flock.christmasTheme.lightShowRunning)
+
+            flock.previewNextDoor() // 3: a flurry
+            world.run(flock, frames: 3)
+            _ = frame(flock)
+            let weather = try #require(scene.weatherLayer.children.first)
+            #expect(weather.children.filter { !$0.isHidden }.count == WeatherEffects.FLURRY_SNOW_COUNT)
+
+            flock.previewNextDoor() // 4: just the line
+            flock.previewNextDoor() // 5: a headshake
+            #expect(flock.main.state == .headshake)
+            park(flock.main)
+
+            flock.previewNextDoor() // 6: everyone around the tree
+            #expect(flock.groupActivity?.type == .juletregang)
+            flock.cancelConversation() // (also clears the activity)
+            #expect(flock.groupActivity == nil)
+            flock.previewNextDoor() // 7
+            park(flock.main)
+            flock.previewNextDoor() // 8: presents
+            #expect(flock.groupActivity?.type == .giftExchange)
+            flock.cancelConversation()
+
+            for _ in 9...23 { flock.previewNextDoor() }
+            park(flock.main)
+            flock.cancelConversation()
+            flock.previewNextDoor() // 24: the sleigh
+            #expect(flock.mainBubble.currentText == "Luke 24: God jul! Now look up.")
+            #expect(flock.spectacle?.type == .sleigh)
+            flock.previewNextDoor() // and round again
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 1: "))
+
+            // Nothing was opened for real
+            #expect(flock.christmasStats.doorsOpened.isEmpty)
+            #expect(ChristmasMemory.getStats().doorsOpened.isEmpty)
+        }
+    }
+
+    // MARK: around the tree
+
+    @Test func aTreeActivityNeedsTheSeasonAFreeStageAndTwoSheep() {
+        withWorld { world in
+            let flock = christmasFlock(world) // main + Good Colleague
+            #expect(!flock.startChristmasActivity(.juletregang)) // quietStage filters everyone out
+            flock.participantFilter = nil
+            #expect(!flock.startChristmasActivity(.huddle)) // not a tree activity
+            #expect(flock.startChristmasActivity(.juletregang)) // two sheep: a very small party
+            let activity = flock.groupActivity
+            #expect(activity?.participants == ["main", "good_colleague"])
+            #expect(activity?.centerX == flock.christmasTheme.treeX - DS / 2)
+            #expect(!flock.startChristmasActivity(.giftExchange)) // one at a time
+
+            flock.setChristmasMode(.off) // the tree is gone: so is the party
+            #expect(flock.groupActivity == nil)
+            #expect(!flock.startChristmasActivity(.juletregang))
+        }
+    }
+
+    @Test func itWakesTheDozersAndLeavesTheBusyOnesAlone() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a"), friend("b")])
+            flock.participantFilter = nil
+            sheep(flock, "good_colleague").state = .idleCampfire
+            sheep(flock, "a").state = .grabbed
+            #expect(flock.startChristmasActivity(.giftExchange))
+            #expect(flock.groupActivity?.participants == ["main", "good_colleague", "b"])
+            #expect(sheep(flock, "good_colleague").state == .idle) // woken up
+            #expect(sheep(flock, "a").state == .grabbed)
+        }
+    }
+
+    @Test func theRandomRollPicksATreeActivityAndSendsTheFlockToTheTree() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            flock.participantFilter = nil
+            park(flock.main, x: 500)
+            park(sheep(flock, "good_colleague"), x: 720)
+            park(sheep(flock, "a"), x: 940)
+            flock.friendAIChat = nil
+            world.forcedRandom = 0
+            world.step(flock, 600)
+            world.forcedRandom = nil
+            #expect(flock.groupActivity?.type == .juletregang)
+            #expect(flock.groupActivity?.centerX == flock.christmasTheme.treeX - DS / 2)
+        }
+    }
+
+    @Test func aFinishedWalkAroundTheTreeIsCounted() {
+        withWorld { world in
+            let log = EventLog()
+            let flock = christmasFlock(world, friends: [friend("a")])
+            flock.participantFilter = nil
+            world.autoHideMs = 50
+            #expect(flock.startChristmasActivity(.juletregang))
+            #expect(world.run(flock, maxFrames: 6000) { flock.groupActivity == nil } > 0)
+            #expect(log.groupActivities.map(\.type) == ["juletregang"])
+            #expect(flock.christmasStats.carolsSungTotal == 1)
+            #expect(ChristmasMemory.getStats().carolsSungTotal == 1)
+            #expect(flock.christmasTheme.hudVisible)
+            // They sang while they walked
+            #expect(FriendMemory.getFriendBrain("a").memories.contains { $0.text.hasPrefix("Joined a juletregang with ") })
+        }
+    }
+
+    @Test func aCancelledWalkIsNot() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            flock.participantFilter = nil
+            #expect(flock.startChristmasActivity(.juletregang))
+            world.run(flock, frames: 200)
+            flock.cancelConversation()
+            #expect(flock.groupActivity == nil)
+            #expect(flock.christmasStats.carolsSungTotal == 0)
+        }
+    }
+
+    @Test func theGiftExchangeCountsThePresentsAndWrapsNewOnes() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            flock.participantFilter = nil
+            world.autoHideMs = 50
+            #expect(flock.startChristmasActivity(.giftExchange))
+            var mostOpened = 0
+            let frames = world.run(flock, maxFrames: 6000) {
+                mostOpened = max(mostOpened, flock.christmasTheme.presents.filter(\.opened).count)
+                return flock.groupActivity == nil
+            }
+            #expect(frames > 0)
+            #expect(mostOpened == 3) // one each
+            #expect(flock.christmasStats.giftsOpenedTotal == 3)
+            #expect(ChristmasMemory.getStats().giftsOpenedTotal == 3)
+            #expect(flock.christmasTheme.presents.allSatisfy { !$0.opened }) // restocked
+        }
+    }
+
+    // MARK: the sleigh
+
+    @Test func theSleighFliesWhetherOrNotAnyoneIsThereToSeeIt() {
+        withWorld { world in
+            world.now = decemberMs(13)
+            let flock = Flock(W, H) // the main sheep is still parachuting in
+            #expect(!flock.startSpectacle(.wolf))
+            #expect(flock.startSpectacle(.sleigh))
+            #expect(flock.spectacle?.participants == [])
+        }
+    }
+
+    @Test func aSleighSeenAtChristmasIsCounted() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            #expect(flock.startSpectacle(.sleigh))
+            #expect(world.run(flock, maxFrames: 4000) { flock.spectacle == nil } > 0)
+            #expect(flock.christmasStats.sleighsSeenTotal == 1)
+            #expect(ChristmasMemory.getStats().sleighsSeenTotal == 1)
+            #expect(flock.christmasTheme.hudVisible)
+        }
+        withWorld { world in
+            let flock = makeFlock(friends: [friend("a")]) // September: a debug sleigh leaves no trace
+            quietStage(flock)
+            #expect(flock.startSpectacle(.sleigh))
+            #expect(world.run(flock, maxFrames: 4000) { flock.spectacle == nil } > 0)
+            #expect(flock.christmasStats.sleighsSeenTotal == 0)
+            #expect(!FileManager.default.fileExists(atPath: Paths.christmasStats.path))
+        }
+    }
+
+    @Test func onADecemberNightTheSchedulerSendsTheSleigh() {
+        withWorld { world in
+            // No spectacle ever fired: the pity timer is due at the first check
+            let flock = christmasFlock(world, hour: 22, scheduler: .asIs)
+            world.step(flock, SPECTACLE.CHECK_INTERVAL_MS)
+            #expect(flock.spectacle?.type == .sleigh)
+        }
+        withWorld(hour: 22) { world in
+            let flock = makeFlock(scheduler: .asIs) // a September night: nothing flies
+            quietStage(flock)
+            world.step(flock, SPECTACLE.CHECK_INTERVAL_MS)
+            #expect(flock.spectacle == nil)
+        }
+    }
+
+    // MARK: talk
+
+    @Test func friendsQuipAboutChristmas() throws {
+        try withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            world.autoHideMs = nil
+            let a = try #require(flock.getFriendEntry("a"))
+            a.nextQuipTime = world.now - 1
+            world.forcedRandom = 0 // the 35% roll hits
+            world.step(flock, 600)
+            world.forcedRandom = nil
+            #expect(CHRISTMAS_IDLE_QUIPS.contains(bubble(flock, "a").currentText))
+        }
+    }
+
+    @Test func conversationsCanTurnToChristmas() {
+        withWorld { world in
+            let flock = christmasFlock(world, friends: [friend("a")])
+            park(flock.main, x: 600)
+            park(sheep(flock, "a"), x: 700)
+            world.autoHideMs = nil
+            world.step(flock) // the first snowflakes take their rolls
+            // pair roll (2%) hits, don't skip, the Christmas roll (30%) hits, first script
+            world.socialTick(flock, rolls: [0.0, 0.9, 0.1, 0.0])
+            #expect(flock.activeConversation?.participants == ["main", "a"])
+            #expect(flock.activeConversation?.lines.first?.text == "What do the humans eat at Christmas?")
+        }
     }
 }

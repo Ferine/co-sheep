@@ -79,6 +79,13 @@ final class OverlayHost {
         ScreenSize(width: Double(screenFrame.width), height: Double(screenFrame.height))
     }
 
+    /// Height of the menu bar on the overlay's screen (0 when it auto-hides):
+    /// the panel sits below it, so anything drawn there is covered.
+    var menuBarHeight: Double {
+        guard let screen = NSScreen.screens.first else { return 0 }
+        return max(0, Double(screen.frame.maxY - screen.visibleFrame.maxY))
+    }
+
     /// Re-fit to the primary screen (resolution/arrangement changed).
     /// Returns true when the size changed.
     @discardableResult

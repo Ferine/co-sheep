@@ -34,6 +34,7 @@ extension BrainTests {
             #expect(c.breakReminders)
             #expect(c.easterMode == "auto")
             #expect(c.summerMode == "auto")
+            #expect(c.christmasMode == "auto")
             #expect(c.weatherLocation == "")
             #expect(c.accessories.isEmpty)
         }
@@ -48,6 +49,7 @@ extension BrainTests {
             #expect(c.breakReminders)
             #expect(c.easterMode == "auto")
             #expect(c.summerMode == "auto")
+            #expect(c.christmasMode == "auto")
             #expect(c.friends == [FriendDef(id: "f1", name: "Pelle", color: "blue")])
             #expect(c.friends[0].personality == "wholesome")
             #expect(c.friends[0].scale == 1.0)
@@ -84,6 +86,18 @@ extension BrainTests {
             }
         }
 
+        @Test func christmasModeIsReadAsAModeWithAutoAsTheFallback() throws {
+            try withBrainRoot { _ in
+                #expect(Config.getChristmasMode() == .auto) // no config at all
+                try Config.updateConfig { $0.christmasMode = "on" }
+                #expect(Config.getChristmasMode() == .on)
+                try Config.updateConfig { $0.christmasMode = "off" }
+                #expect(Config.getChristmasMode() == .off)
+                try Config.updateConfig { $0.christmasMode = "sometimes" } // hand-edited nonsense
+                #expect(Config.getChristmasMode() == .auto)
+            }
+        }
+
         @Test func savedShapeUsesTheSerdeKeys() throws {
             try withBrainRoot { _ in
                 var c = SheepConfig()
@@ -92,7 +106,7 @@ extension BrainTests {
                 let json = try #require(try readJSON(Paths.config).objectValue)
                 #expect(Set(json.keys) == [
                     "name", "personality", "interval_secs", "language", "friends", "break_reminders",
-                    "easter_mode", "summer_mode", "weather_location", "accessories",
+                    "easter_mode", "summer_mode", "christmas_mode", "weather_location", "accessories",
                     "mcp_enabled", "mcp_port", "mcp_token",
                     "herd_enabled", "herd_max_lambs", "shepherd_commentary",
                 ])

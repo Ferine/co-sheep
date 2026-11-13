@@ -190,3 +190,57 @@ struct SpectacleStateJSONTests {
         #expect(back == s)
     }
 }
+
+@Suite("sleigh scheduling")
+struct SleighSchedulingTests {
+    /// A fresh state long after launch: the pity timer is due, so `rand`
+    /// goes straight into the weighted pick.
+    private func pick(_ rand: Double, night: Bool = false, christmas: Bool = true,
+                      state: SpectacleSchedulerState = fresh(), now: Double = 100 * DAY) -> SpectacleType? {
+        pickRandomSpectacle(SchedulerInput(state: state, nowMs: now, isNight: night, rand: rand, christmas: christmas))
+    }
+
+    @Test func theSleighOnlyFliesAtChristmas() {
+        for i in 0..<200 {
+            #expect(pick(Double(i) / 200, christmas: false) != .sleigh)
+        }
+        #expect(SpectacleType.allCases.last == .sleigh)
+        #expect(SpectacleType.sleigh.rawValue == "sleigh")
+    }
+
+    @Test func atChristmasItJoinsTheEndOfTheTable() {
+        // Weights 3, 2, 2, 2, 1 and 4 for the sleigh: it owns the top 4/14 of the roll
+        #expect(pick(0) == .wolf)
+        #expect(pick(9.99 / 14) == .shearing)
+        #expect(pick(10.01 / 14) == .sleigh)
+        #expect(pick(0.999) == .sleigh)
+        #expect(SPECTACLE.SLEIGH_WEIGHT == 4)
+    }
+
+    @Test func afterDarkTheSleighIsTheOnlyThingInTheSky() {
+        for rand in [0.0, 0.3, 0.7, 0.999] {
+            #expect(pick(rand, night: true) == .sleigh)
+            #expect(pick(rand, night: true, christmas: false) == nil)
+        }
+    }
+
+    @Test func theGapAndTheLuckStillApplyAtNight() {
+        let state = firedAt(100 * DAY)
+        #expect(pick(0, night: true, state: state, now: 100 * DAY + SPECTACLE.MIN_GAP_MS - 1) == nil)
+        #expect(pick(0.99, night: true, state: state, now: 100 * DAY + SPECTACLE.MIN_GAP_MS + 1) == nil)
+        #expect(pick(0, night: true, state: state, now: 100 * DAY + SPECTACLE.MIN_GAP_MS + 1) == .sleigh)
+    }
+
+    @Test func itComesBackAfterTwoDaysNotSeven() {
+        let state = markFired(fresh(), .sleigh, 100 * DAY)
+        #expect(SPECTACLE.SLEIGH_COOLDOWN_MS == 2 * DAY)
+        #expect(pick(0, night: true, state: state, now: 102 * DAY - 1) == nil) // nothing else flies at night
+        #expect(pick(0, night: true, state: state, now: 102 * DAY) == .sleigh)
+        // By day the others fill in while it rests (a lucky roll at the top of the range)
+        #expect(pick(SPECTACLE.TICK_CHANCE * 0.999, state: state, now: 102 * DAY - 1) == .shearing)
+
+        // A wolf that fired at the same time still needs its week
+        let wolf = markFired(fresh(), .wolf, 100 * DAY)
+        #expect(pick(0, state: wolf, now: 102 * DAY) == .ufo)
+    }
+}

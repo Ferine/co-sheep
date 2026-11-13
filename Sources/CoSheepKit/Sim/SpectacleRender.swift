@@ -1,13 +1,15 @@
 import Foundation
 
 // Ex-spectacle-render.ts: the scenes behind each spectacle (wolf scare, UFO,
-// merchant, balloon, shearing day, showdown, feast) — their update state
-// machines and their procedural Canvas drawing.
+// merchant, balloon, shearing day, showdown, feast, and the Christmas sleigh)
+// — their update state machines and their procedural Canvas drawing.
 //
 // Tiles: the Flock wraps `drawSpectacleScene` in the group "spectacle". Shearing
 // day paints an overlay on every participant, which can be far apart, so each
 // overlay goes into its own "spectacle:shorn:<id>" group (nested inside the
-// outer one) instead of stretching one tile across the screen.
+// outer one) instead of stretching one tile across the screen. The sleigh and
+// the present it drops are a screen apart too: "spectacle:sleigh" and
+// "spectacle:gift", each anchored so flying and falling only move a node.
 
 /// ex-`SpectacleWorld`: what a scene may ask of the flock.
 struct SpectacleWorld {
@@ -88,6 +90,30 @@ nonisolated enum SpectacleRenderData {
 
     static let SHEARING_BUBBLES = ["MY WOOL!", "Don't look at me.", "This is a violation.", "Cold. So cold."]
     static let SHEARING_TOTAL_MS: Double = 60_000
+
+    // Sleigh: the nisse, his sack and a team of two flying sheep
+    /// One art pixel of the sleigh, in points.
+    static let SLEIGH_PX: Double = 3
+    /// Sleigh plus team, nose to runner (63 art pixels).
+    static let SLEIGH_LENGTH: Double = 63 * SLEIGH_PX
+    static let SLEIGH_FLIGHT_MS: Double = 13_000
+    static let SLEIGH_GIFT_FALL_PX_PER_MS: Double = 0.13
+    /// How long a landed present waits for someone to open it.
+    static let SLEIGH_GIFT_WAIT_MS: Double = 9000
+    static let SLEIGH_GIFT_REACH: Double = 36
+    static let SLEIGH_GIFT_W: Double = 16
+    static let SLEIGH_GIFT_H: Double = 14
+    static let SLEIGH_SPOTTED = [
+        "Is that... a sleigh?",
+        "Up there! UP THERE!",
+        "Those are sheep. Pulling a sleigh. Respect.",
+    ]
+    static let SLEIGH_GIFT_LINES = [
+        "Air mail!",
+        "He does exist. Noted.",
+        "A present! From the sky!",
+        "I'd like to see his flight plan.",
+    ]
 }
 
 func createSpectacleScene(
@@ -105,6 +131,7 @@ func createSpectacleScene(
         actorX: type == .merchant ? screenW + SIZE : -SIZE,
         actorY: type == .ufo ? -SIZE
             : type == .balloon ? screenH * 0.15
+            : type == .sleigh ? screenH * 0.16
             : screenH - SpectacleRenderData.GROUND_OFFSET,
         facingRight: type != .merchant,
         pairIds: pair,
@@ -112,6 +139,10 @@ func createSpectacleScene(
     )
     if type == .ufo {
         scene.targetId = calmIds.isEmpty ? "main" : calmIds[SimRandom.int(calmIds.count)]
+    }
+    if type == .sleigh {
+        // The present is for the main sheep, or whoever is around to catch it
+        scene.targetId = calmIds.contains("main") ? "main" : calmIds.first
     }
     return scene
 }
@@ -127,6 +158,7 @@ func updateSpectacleScene(_ scene: SpectacleScene, _ dt: Double, _ world: Specta
     case .shearing: return updateShearing(scene, dt, world)
     case .showdown: return updateShowdown(scene, dt, world)
     case .feast: return updateFeast(scene, dt, world)
+    case .sleigh: return updateSleigh(scene, dt, world)
     }
 }
 
@@ -420,6 +452,98 @@ private func updateFeast(_ scene: SpectacleScene, _ dt: Double, _ world: Spectac
     return true
 }
 
+/// The sleigh crosses the sky left to right, drops one present by parachute
+/// and is gone; whoever the present was for walks over and opens it. Scene
+/// time lives in `data["clock"]` (the phase timer restarts when it lands).
+private func updateSleigh(_ scene: SpectacleScene, _ dt: Double, _ world: SpectacleWorld) -> Bool {
+    let D = SpectacleRenderData.self
+    let clock = (scene.data["clock"] ?? 0) + dt
+    scene.data["clock"] = clock
+    let recipient = scene.targetId.flatMap { world.getCharacter($0) }
+
+    if scene.phase == .enter {
+        scene.phase = .perform
+        scene.timer = 0
+        scene.actorX = -D.SLEIGH_LENGTH
+        for id in scene.participants {
+            if let c = world.getCharacter(id) { setState(c.sheep, .sit, 16000) }
+        }
+        // Drop it beside the recipient, not on its head
+        let aim = recipient.map { $0.sheep.x + $0.sheep.displaySize / 2 + 70 } ?? world.screenW / 2
+        scene.data["dropX"] = min(max(aim, world.screenW * 0.15), world.screenW * 0.85)
+        return true
+    }
+
+    if scene.phase == .perform {
+        scene.actorX += ((world.screenW + D.SLEIGH_LENGTH * 2) / D.SLEIGH_FLIGHT_MS) * dt
+        if scene.timer > 2500 && !scene.flag("spotted") {
+            scene.data["spotted"] = 1
+            let c = scene.participants.first.flatMap { world.getCharacter($0) }
+            if let c, !c.bubble.visible {
+                c.bubble.show(D.SLEIGH_SPOTTED[SimRandom.int(D.SLEIGH_SPOTTED.count)], duration: 3500)
+            }
+        }
+        // Heads follow the sleigh until the present is the more interesting thing
+        if !scene.flag("landed") {
+            let sleighX = scene.actorX + D.SLEIGH_LENGTH / 2
+            for id in scene.participants {
+                if let c = world.getCharacter(id) { c.sheep.facingRight = sleighX > c.sheep.x }
+            }
+        }
+        if scene.actorX > world.screenW + 40 { scene.phase = .exit }
+    }
+
+    // The present leaves the sleigh above its landing spot...
+    let dropX = scene.data["dropX"] ?? world.screenW / 2
+    if !scene.flag("dropped") && scene.actorX + 30 >= dropX {
+        scene.data["dropped"] = 1
+        scene.data["giftX"] = dropX
+        scene.data["giftY"] = scene.actorY + 30
+    }
+    guard scene.flag("dropped"), let giftX = scene.data["giftX"], let giftY = scene.data["giftY"] else {
+        // Nothing dropped: the scene is over once the sleigh is gone
+        return scene.phase != .exit
+    }
+
+    // ...floats down on its parachute...
+    let landY = world.screenH - Sheep.DOCK_MARGIN - 3
+    if !scene.flag("landed") {
+        let y = giftY + D.SLEIGH_GIFT_FALL_PX_PER_MS * dt
+        scene.data["giftY"] = min(y, landY)
+        if y >= landY {
+            scene.data["landed"] = 1
+            scene.data["landedAt"] = clock
+        }
+        return true
+    }
+
+    // ...and waits for its sheep, which walks over by facing (walkTarget
+    // would stop it a sheep and a half short).
+    if scene.data["openedAt"] == nil {
+        var opened = clock - (scene.data["landedAt"] ?? clock) > D.SLEIGH_GIFT_WAIT_MS
+        if let recipient, recipient.sheep.canBeDirected {
+            let sheep = recipient.sheep
+            let center = sheep.x + sheep.displaySize / 2
+            if abs(center - giftX) < D.SLEIGH_GIFT_REACH {
+                opened = true
+                scene.data["caught"] = 1
+                sheep.playAnimation(.bounce)
+                recipient.bubble.show(D.SLEIGH_GIFT_LINES[SimRandom.int(D.SLEIGH_GIFT_LINES.count)], duration: 4000)
+            } else {
+                sheep.walkTarget = nil
+                sheep.facingRight = giftX > center
+                if sheep.state != .walk { setState(sheep, .walk, 15000) }
+            }
+        }
+        if opened { scene.data["openedAt"] = clock }
+        return true
+    }
+
+    // Sparkles, then done (once the sleigh has left the screen too)
+    let sparkled = clock - (scene.data["openedAt"] ?? clock) > 1400
+    return !(sparkled && scene.phase == .exit)
+}
+
 func drawSpectacleScene(_ scene: SpectacleScene, _ ctx: Canvas, _ world: SpectacleWorld) {
     switch scene.type {
     case .wolf: drawWolf(ctx, scene.actorX, scene.actorY, scene.facingRight)
@@ -429,7 +553,144 @@ func drawSpectacleScene(_ scene: SpectacleScene, _ ctx: Canvas, _ world: Spectac
     case .shearing: drawShornOverlays(ctx, scene, world)
     case .showdown: drawTumbleweed(ctx, scene, world)
     case .feast: break // campfire visuals come from the existing idle_campfire state
+    case .sleigh: drawSleighScene(ctx, scene, world)
     }
+}
+
+// Sleigh art, one character per art pixel, drawn left to right: the sleigh
+// (nisse and sack aboard), then the team.
+private let SLEIGH_ART = [
+    "....hh..............",
+    "...hhhh.............",
+    "..wwwwww............",
+    "...ffff.....ss......",
+    "...bbbb....ssss.....",
+    "..ccbbcc..ssssss....",
+    "RRccccccRRssssssRR..",
+    "RRRRRRRRRRRRRRRRRRR.",
+    ".RRRRRRRRRRRRRRRRRRg",
+    "..g......g......g.g.",
+    "gggggggggggggggggg..",
+]
+
+private let SLEIGH_PALETTE: [Character: String] = [
+    "h": "#E0362F", "w": "#FFFFFF", "f": "#F2C9A0", "b": "#FFFFFF", "c": "#E0362F",
+    "s": "#8B5A2B", "R": "#9C1F2E", "g": "#FFD54A",
+]
+
+/// A flying sheep in antlers. `n` is the nose: red on the lead animal.
+private let SLEIGH_SHEEP_BODY = [
+    ".........a.a.",
+    "..WWWWW..aaa.",
+    ".WWWWWWWHHHH.",
+    "WWWWWWWWHHHHn",
+    "WWWWWWWWHHHH.",
+    ".WWWWWWWW....",
+    "..WWWWWW.....",
+]
+
+/// Two gallop frames: legs flung out, legs gathered.
+private let SLEIGH_SHEEP_LEGS = [
+    ["..L.L..L.L...", ".L...L.L...L."],
+    ["...LL..LL....", "...L....L...."],
+]
+
+private func sleighSheepPalette(lead: Bool) -> [Character: String] {
+    ["W": "#F5F5F0", "H": "#3A3A44", "a": "#8B5A2B", "L": "#3A3A44", "n": lead ? "#FF3B30" : "#3A3A44"]
+}
+
+private func drawSleighScene(_ ctx: Canvas, _ scene: SpectacleScene, _ world: SpectacleWorld) {
+    let D = SpectacleRenderData.self
+    let clock = scene.data["clock"] ?? 0
+
+    if scene.phase == .perform {
+        let bob = sin(clock / 700) * 5
+        let x = scene.actorX
+        let y = scene.actorY + bob
+        ctx.group("spectacle:sleigh", anchor: CGPoint(x: x, y: y)) {
+            drawSleighTeam(ctx, x, y, clock)
+        }
+    }
+
+    guard scene.flag("dropped"), let giftX = scene.data["giftX"], let giftY = scene.data["giftY"] else { return }
+    if let openedAt = scene.data["openedAt"] {
+        // Popped: a second and a half of sparkles where it stood
+        let left = 1.4 - (clock - openedAt) / 1000
+        if left > 0 {
+            let cy = giftY - D.SLEIGH_GIFT_H / 2
+            ctx.group("spectacle:gift", anchor: CGPoint(x: giftX, y: cy)) {
+                ChristmasTheme.drawSparkle(ctx, giftX, cy, left + 0.6, clock / 1000)
+            }
+        }
+        return
+    }
+
+    let falling = !scene.flag("landed")
+    let x = giftX + (falling ? sin(clock / 400) * 6 : 0)
+    ctx.save()
+    defer { ctx.restore() }
+    ctx.group("spectacle:gift", anchor: CGPoint(x: x, y: giftY)) {
+        if falling {
+            // Parachute: a white canopy and two lines down to the box
+            let top = giftY - D.SLEIGH_GIFT_H
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)"
+            ctx.lineWidth = 1
+            ctx.lineJoin = "round"
+            ctx.beginPath()
+            ctx.moveTo(x - 13, top - 16)
+            ctx.lineTo(x - D.SLEIGH_GIFT_W / 2, top)
+            ctx.moveTo(x + 13, top - 16)
+            ctx.lineTo(x + D.SLEIGH_GIFT_W / 2, top)
+            ctx.stroke()
+            ctx.fillStyle = "#F4F8FF"
+            ctx.beginPath()
+            ctx.ellipse(x, top - 16, 14, 10, 0, Double.pi, Double.pi * 2)
+            ctx.fill()
+            ctx.fillStyle = "#D62B2B"
+            ctx.beginPath()
+            ctx.ellipse(x, top - 16, 5, 10, 0, Double.pi, Double.pi * 2)
+            ctx.fill()
+        }
+        ChristmasTheme.drawPresent(ctx, x, giftY, D.SLEIGH_GIFT_W, D.SLEIGH_GIFT_H, "#D62B2B", "#FFD54A")
+    }
+}
+
+/// The sleigh with its top-left corner at (x, y), facing right.
+private func drawSleighTeam(_ ctx: Canvas, _ x: Double, _ y: Double, _ clock: Double) {
+    let px = SpectacleRenderData.SLEIGH_PX
+    let pen = PixelPen(ctx: ctx, ox: x, oy: y, px: px, flip: false)
+    let gallop = Int(clock / 180) % 2
+
+    ctx.save()
+    // Star dust trailing behind, stepping ten times a second
+    let twinkle = Int(clock / 100)
+    ctx.fillStyle = "#FFD54A"
+    for i in 0..<5 {
+        ctx.globalAlpha = 0.75 - Double(i) * 0.14
+        let size: Double = (twinkle + i) % 2 == 0 ? 3 : 2
+        ctx.fillRect(x - 10 - Double(i) * 13, y + 18 + sin(Double(twinkle + i * 2) * 0.9) * 5, size, size)
+    }
+    ctx.globalAlpha = 1
+
+    // Reins from the sleigh's prow to each collar
+    ctx.strokeStyle = "#6B4423"
+    ctx.lineWidth = 1.5
+    ctx.lineJoin = "round"
+    ctx.beginPath()
+    ctx.moveTo(x + 19 * px, y + 7 * px)
+    ctx.lineTo(x + 31 * px, y + 6 * px)
+    ctx.lineTo(x + 47 * px, y + 6 * px)
+    ctx.stroke()
+
+    pen.sprite(SLEIGH_ART, 0, 0, SLEIGH_PALETTE)
+    // The second sheep gallops half a stride out of step
+    for (index, gx) in [22.0, 38.0].enumerated() {
+        let lead = index == 1
+        let rise: Double = (gallop + index) % 2 == 0 ? 0 : 1
+        pen.sprite(SLEIGH_SHEEP_BODY, gx, 1 + rise, sleighSheepPalette(lead: lead))
+        pen.sprite(SLEIGH_SHEEP_LEGS[(gallop + index) % 2], gx, 8 + rise, sleighSheepPalette(lead: lead))
+    }
+    ctx.restore()
 }
 
 private func drawWolf(_ ctx: Canvas, _ x: Double, _ y: Double, _ facingRight: Bool) {

@@ -13,6 +13,7 @@ struct ConversationContext {
     var recentEasterHunt: Bool
     var eggPaintingActive: Bool
     var summerActive: Bool
+    var christmasActive: Bool
 
     init(personalityA: FriendPersonality? = nil,
          personalityB: FriendPersonality? = nil,
@@ -21,7 +22,8 @@ struct ConversationContext {
          easterTheme: (any EasterThemeHooks)? = nil,
          recentEasterHunt: Bool = false,
          eggPaintingActive: Bool = false,
-         summerActive: Bool = false) {
+         summerActive: Bool = false,
+         christmasActive: Bool = false) {
         self.personalityA = personalityA
         self.personalityB = personalityB
         self.weather = weather
@@ -30,6 +32,7 @@ struct ConversationContext {
         self.recentEasterHunt = recentEasterHunt
         self.eggPaintingActive = eggPaintingActive
         self.summerActive = summerActive
+        self.christmasActive = christmasActive
     }
 }
 
@@ -197,6 +200,82 @@ private let SUMMER_GC_SCRIPTS: [ScriptTemplate] = [
     [
         scriptLine("good_colleague", "Fin dag. Kaffi ute?", 3000, 0),
         scriptLine("$OTHER", "Hot coffee? In this heat?", 3000, 700),
+        scriptLine("good_colleague", "Ja.", 2000, 600),
+    ],
+]
+
+// --- Christmas scripts (active December 1 – January 6) ---
+
+private let CHRISTMAS_SCRIPTS: [ScriptTemplate] = [
+    [
+        scriptLine("$A", "What do the humans eat at Christmas?", 3500, 0),
+        scriptLine("$B", "Ribbe. Definitely ribbe.", 3000, 700),
+        scriptLine("$A", "And pinnekjøtt? What's pinne—", 3500, 700),
+        scriptLine("$B", "RIBBE. We say ribbe.", 3000, 500, .vibrate),
+    ],
+    [
+        scriptLine("$A", "Is the hat itchy for you too?", 3500, 0),
+        scriptLine("$B", "It's wool. We're wool. It's wool on wool.", 4000, 700),
+        scriptLine("$A", "...so that's a yes.", 3000, 800),
+    ],
+    [
+        scriptLine("$A", "Do you think the nisse is real?", 3500, 0),
+        scriptLine("$B", "Someone ate the porridge.", 3000, 700),
+        scriptLine("$A", "That was me.", 2500, 800),
+        scriptLine("$B", "Then no.", 2500, 600, .headshake),
+    ],
+    [
+        scriptLine("$A", "I asked for a bigger screen this year.", 4000, 0),
+        scriptLine("$B", "And?", 2000, 600),
+        scriptLine("$A", "Socks.", 2500, 700),
+        scriptLine("$B", "Classic.", 2500, 600),
+    ],
+    [
+        scriptLine("$A", "The tree is watching me.", 3000, 0),
+        scriptLine("$B", "It's a tree.", 2500, 600),
+        scriptLine("$A", "It BLINKS.", 2500, 600, .vibrate),
+        scriptLine("$B", "Those are lights.", 3000, 700, .headshake),
+    ],
+    [
+        scriptLine("$A", "How many days left?", 3000, 0),
+        scriptLine("$B", "You asked an hour ago.", 3000, 700),
+        scriptLine("$A", "And?", 2000, 600),
+        scriptLine("$B", "Same number. Minus nothing.", 3500, 700),
+    ],
+    [
+        scriptLine("$A", "It's snowing INSIDE the screen.", 3500, 0),
+        scriptLine("$B", "Don't question it. Catch one.", 3500, 700, .bounce),
+    ],
+]
+
+private let CHRISTMAS_GC_SCRIPTS: [ScriptTemplate] = [
+    [
+        scriptLine("good_colleague", "Julebord på fredag.", 3000, 0),
+        scriptLine("$OTHER", "Are sheep invited?", 3000, 700),
+        scriptLine("good_colleague", "Du er på menyen.", 3000, 800),
+        scriptLine("$OTHER", "...I'm busy Friday.", 3000, 700, .zoom),
+    ],
+    [
+        scriptLine("$OTHER", "What do you want for Christmas?", 3500, 0),
+        scriptLine("good_colleague", "Fred og ro.", 2500, 700),
+        scriptLine("$OTHER", "That's it?", 2500, 600),
+        scriptLine("good_colleague", "Og kaffe.", 2500, 600),
+    ],
+    [
+        scriptLine("good_colleague", "Ribbe eller pinnekjøtt?", 3000, 0),
+        scriptLine("$OTHER", "You're asking a SHEEP that?", 3500, 700, .vibrate),
+        scriptLine("good_colleague", "...ribbe, da.", 2500, 800),
+    ],
+    [
+        scriptLine("good_colleague", "Nå er det jul igjen.", 3000, 0),
+        scriptLine("$OTHER", "And then?", 2000, 600),
+        scriptLine("good_colleague", "Og jula varer helt til påske.", 3500, 700),
+        scriptLine("$OTHER", "That's not how calendars work.", 3500, 700, .headshake),
+        scriptLine("good_colleague", "Nei.", 2000, 600),
+    ],
+    [
+        scriptLine("good_colleague", "God jul, da.", 2500, 0),
+        scriptLine("$OTHER", "God jul! ...is that all?", 3000, 700),
         scriptLine("good_colleague", "Ja.", 2000, 600),
     ],
 ]
@@ -499,6 +578,14 @@ func pickConversation(_ idA: String, _ idB: String, _ context: ConversationConte
             return pickFrom(SUMMER_GC_SCRIPTS, idA, idB)
         }
         return pickFrom(SUMMER_SCRIPTS, idA, idB)
+    }
+
+    // Try Christmas scripts (seasonal chance while the tree is up)
+    if context?.christmasActive == true && SimRandom.next() < 0.3 {
+        if hasGC {
+            return pickFrom(CHRISTMAS_GC_SCRIPTS, idA, idB)
+        }
+        return pickFrom(CHRISTMAS_SCRIPTS, idA, idB)
     }
 
     // Try weather-aware scripts (25% chance when weather active)

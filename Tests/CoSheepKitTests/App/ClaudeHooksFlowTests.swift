@@ -79,6 +79,18 @@ extension BrainTests {
             #expect(Set(commands).count == commands.count)
         }
 
+        @Test func debugMenuHasTheChristmasCommands() {
+            let items = Dictionary(uniqueKeysWithValues: Menus.debugItems.map { ($0.command, $0.title) })
+            #expect(items["spectacle:sleigh"] == "Spectacle: Sleigh")
+            #expect(items["christmas:door"] == "Christmas: Preview Next Door")
+            #expect(items["christmas:juletregang"] == "Christmas: Juletregang")
+            #expect(items["christmas:gifts"] == "Christmas: Gift Exchange")
+            // Every "spectacle:" item names a real spectacle
+            for command in items.keys where command.hasPrefix("spectacle:") {
+                #expect(SpectacleType(rawValue: String(command.dropFirst("spectacle:".count))) != nil, "\(command)")
+            }
+        }
+
         private func menuActions(status: @escaping () -> HookInstallStatus) -> MenuActions {
             MenuActions(
                 settings: {}, memory: {}, friends: {}, friendRelationships: {}, wardrobe: {}, chat: {},

@@ -8,10 +8,11 @@ import Foundation
 // Rendering (see plan: z-order bands): `draw(_:)` routes each layer into a
 // Canvas group (= one GPU tile), in the original TS draw order:
 //
-//     easter:bg, summer:bg, easter:mid, summer:mid,
+//     easter:bg, summer:bg, christmas:bg, easter:mid, summer:mid, christmas:mid,
 //     sheep:main, sheep:<friendId>… (map order),
-//     spectacle (only while one runs; shearing adds spectacle:shorn:<id> tiles),
-//     easter:fg, summer:fg                      — all `.world` layer
+//     spectacle (only while one runs; shearing adds spectacle:shorn:<id> tiles,
+//     the sleigh spectacle:sleigh and spectacle:gift),
+//     easter:fg, summer:fg, christmas:fg        — all `.world` layer
 //     bubble:<id> (visible bubbles only)         — `.overlay` layer
 //
 // Night ambience and weather are SpriteKit-native: `attach(to:)` parents them
@@ -171,7 +172,15 @@ final class Flock {
         .wolf: "wolf scare", .ufo: "UFO encounter", .merchant: "merchant visit",
         .balloon: "balloon flyover", .shearing: "shearing day",
         .showdown: "high-noon showdown", .feast: "reconciliation feast",
+        .sleigh: "sleigh flyover",
     ]
+
+    /// Catching up on missed julekalender doors: one every few minutes.
+    static let DOOR_CATCH_UP_GAP_MS: Double = 180_000
+    /// Back at the screen: time to sit down before a door opens.
+    static let DOOR_WELCOME_BACK_MS: Double = 30_000
+    /// How long a julekalender flurry snows.
+    static let DOOR_FLURRY_MS: Double = 60_000
 
     static let HEX_BY_COLOR: [FriendColor: String] = [
         .pink: "#e94560", .blue: "#4a90d9", .green: "#4ecca3",
@@ -262,6 +271,16 @@ final class Flock {
     /// Internal (not private) so tests can reach the hunt's eggs.
     let easterTheme: EasterTheme
     let summerTheme: SummerTheme
+    let christmasTheme: ChristmasTheme
+    /// The julekalender as last read from / written to `christmas.json`.
+    private(set) var christmasStats = ChristmasStats()
+    private var christmasWasActive = false
+    private var doorCheckTimer: Double = 0
+    private var doorCooldown: Double = 0
+    /// Nobody is at the screen (asleep, locked, screen saver).
+    private var humanAway = false
+    /// Debug preview cursor (see `previewNextDoor`).
+    private var previewDoor = 0
     private var reactiveCooldown: Double = 0
     private var currentWeatherCondition: String?
     private var lastNotificationHour: Int = -1
@@ -317,6 +336,7 @@ final class Flock {
         weatherEffects = WeatherEffects()
         easterTheme = EasterTheme(screenWidth, screenHeight)
         summerTheme = SummerTheme(screenWidth, screenHeight)
+        christmasTheme = ChristmasTheme(screenWidth, screenHeight)
         herd = Herd(screenWidth, screenHeight)
 
         // Create main sheep
@@ -409,7 +429,7 @@ final class Flock {
 
         // Apply accessories if provided
         if let accessories = config.accessories, !accessories.isEmpty {
-            sheep.drawOverlay = createCompositeOverlay(accessories)
+            sheep.setAccessories(accessories)
         }
 
         let bubble = SpeechBubble(listenToCommentary: false,
@@ -506,7 +526,8 @@ final class Flock {
         if spectacle != nil { return false }
         cancelConversation()
         let calmIds = getCharacterIds().filter { isCharacterCalm($0) }
-        if type != .balloon && calmIds.isEmpty { return false }
+        // The balloon and the sleigh fly past whether or not anyone looks up
+        if type != .balloon && type != .sleigh && calmIds.isEmpty { return false }
         spectacle = createSpectacleScene(type, screenWidth, screenHeight, calmIds, pair)
         spectacleSchedulerState = markFired(spectacleSchedulerState, type, SimClock.nowMs())
         saveSpectacleState()
@@ -660,10 +681,41 @@ final class Flock {
         nightAmbience.updateScreenSize(w, h)
         easterTheme.updateScreenSize(w, h)
         summerTheme.updateScreenSize(w, h)
+        christmasTheme.updateScreenSize(w, h)
     }
 
     func setSummerMode(_ mode: SummerMode) {
         summerTheme.setModeOverride(mode)
+    }
+
+    func setChristmasMode(_ mode: ChristmasMode) {
+        christmasTheme.setModeOverride(mode)
+        // Off, or auto outside the season: the tree is gone, so is the party around it.
+        if !christmasTheme.active, groupActivity?.type.gathersAtTree == true {
+            clearGroupActivity(true)
+        }
+    }
+
+    /// The julekalender and tallies from `christmas.json` (the HUD reads them).
+    private func applyChristmasStats(_ stats: ChristmasStats) {
+        christmasStats = stats
+        christmasTheme.applyStats(stats)
+    }
+
+    /// A julekalender door only opens when someone is there to see it: not
+    /// behind a locked or sleeping screen, and not in the first half minute
+    /// after the human is back (a Mac left on overnight would otherwise open
+    /// the day's door at midnight, to nobody).
+    func setHumanAway(_ away: Bool) {
+        if humanAway && !away {
+            doorCooldown = max(doorCooldown, Self.DOOR_WELCOME_BACK_MS)
+        }
+        humanAway = away
+    }
+
+    /// Height of the menu bar: the garland hangs just below it.
+    func setTopInset(_ inset: Double) {
+        christmasTheme.topInset = max(0, inset)
     }
 
     func setEasterMode(_ mode: EasterMode) {
@@ -725,6 +777,9 @@ final class Flock {
         // Build sheep positions for night ambience
         let positions = sheepPositions()
         nightAmbience.update(dt, positions)
+        christmasTheme.update(dt)
+        // Christmas snows when the real weather doesn't
+        weatherEffects.festiveSnow = christmasTheme.active
         weatherEffects.update(dt, screenWidth, screenHeight)
         easterTheme.update(dt, positions)
         summerTheme.update(dt, positions)
@@ -769,6 +824,9 @@ final class Flock {
         // Group activities
         updateGroupActivityLoop(dt, socialTick)
 
+        // Julekalender: one door a day while the Christmas event runs
+        updateJulekalender(dt)
+
         // Spectacles: run the active scene, else roll the scheduler every 5 min.
         if let scene = spectacle {
             let alive = updateSpectacleScene(scene, dt, spectacleWorld())
@@ -790,6 +848,10 @@ final class Flock {
                 }
                 recordSpectacle(kind: Self.SPECTACLE_KIND_LABELS[scene.type] ?? scene.type.rawValue,
                                 participants: who.filter { $0 != "main" })
+                if scene.type == .sleigh && christmasTheme.active {
+                    applyChristmasStats(ChristmasMemory.recordSleigh())
+                    christmasTheme.showHud()
+                }
             }
         } else {
             spectacleCheckTimer += dt
@@ -800,7 +862,8 @@ final class Flock {
                     state: spectacleSchedulerState,
                     nowMs: SimClock.nowMs(),
                     isNight: hour >= 20 || hour < 6,
-                    rand: SimRandom.next()
+                    rand: SimRandom.next(),
+                    christmas: christmasTheme.active
                 ))
                 if let type { startSpectacle(type) }
             }
@@ -887,11 +950,17 @@ final class Flock {
         // Summer sun and glow — behind sheep
         ctx.group("summer:bg") { summerTheme.drawBackground(ctx, w, h) }
 
+        // Christmas garland — behind sheep
+        ctx.group("christmas:bg") { christmasTheme.drawBackground(ctx, w, h) }
+
         // Easter eggs and grass detail — beneath the flock
         ctx.group("easter:mid") { easterTheme.drawMidground(ctx, w, h) }
 
         // Sunflowers — beneath the flock
         ctx.group("summer:mid") { summerTheme.drawMidground(ctx, w, h) }
+
+        // Snow drifts, the tree and its presents — beneath the flock
+        ctx.group("christmas:mid") { christmasTheme.drawMidground(ctx, w, h) }
 
         // Main sheep first (behind friends)
         ctx.group("sheep:main", anchor: CGPoint(x: main.x, y: main.y)) { main.draw(ctx) }
@@ -911,6 +980,9 @@ final class Flock {
 
         // Summer butterflies and drifting seeds — on top of sheep
         ctx.group("summer:fg") { summerTheme.drawForeground(ctx, w, h) }
+
+        // Carol notes, present sparkles and the julekalender — on top of sheep
+        ctx.group("christmas:fg") { christmasTheme.drawForeground(ctx, w, h) }
 
         // Night ambience (stars/moonlight z -1000, fireflies/campfire glow
         // z 1100) and weather particles (z 1000) are SpriteKit-native: they
@@ -938,7 +1010,7 @@ final class Flock {
         }
 
         if let activity = groupActivity {
-            let alive = updateGroupActivity(activity, dt, { self.getSheepById($0) }, easterTheme)
+            let alive = updateGroupActivity(activity, dt, { self.getSheepById($0) }, easterTheme, christmasTheme)
             if !alive {
                 clearGroupActivity()
             }
@@ -974,9 +1046,97 @@ final class Flock {
         }
         let centerX = sumX / Double(participants.count)
 
-        let type = pickActivityType(easterTheme, summerTheme)
-        groupActivity = createGroupActivity(type, participants, centerX)
+        let type = pickActivityType(easterTheme, summerTheme, christmasTheme)
+        groupActivity = createGroupActivity(type, participants, type.gathersAtTree ? treeGatherX : centerX)
         Log.info("flock", "Group activity started: \(type.rawValue) with \(participants.count) participants")
+    }
+
+    /// Where a sheep stands (its left edge) to be centered on the Christmas tree.
+    private var treeGatherX: Double {
+        christmasTheme.treeX - Self.DISPLAY_SIZE / 2
+    }
+
+    /// Start one of the tree activities without waiting for the random roll
+    /// (the julekalender and the debug menu). Everyone who is on their feet
+    /// and free comes along: a sheep dozing by its campfire is woken up for
+    /// the occasion. Two sheep are enough for a very small party.
+    @discardableResult
+    func startChristmasActivity(_ type: GroupActivityType) -> Bool {
+        guard type.gathersAtTree, christmasTheme.active, groupActivity == nil, spectacle == nil else { return false }
+        var ids = getCharacterIds().filter { getSheepById($0)?.sheep.canBeDirected == true }
+        if let participantFilter { ids = participantFilter(ids) }
+        guard ids.count >= 2 else { return false }
+        for id in ids { getSheepById(id)?.sheep.resetActivity() }
+        activeConversation = nil
+        groupActivity = createGroupActivity(type, ids, treeGatherX)
+        Log.info("flock", "Group activity started: \(type.rawValue) with \(ids.count) participants")
+        return true
+    }
+
+    // MARK: Julekalender
+
+    private func updateJulekalender(_ dt: Double) {
+        if doorCooldown > 0 { doorCooldown -= dt }
+
+        let active = christmasTheme.active
+        defer { christmasWasActive = active }
+        guard active else { return }
+        // Switched on (launch in season, midnight on December 1, the settings
+        // override): read the calendar, which starts over every December.
+        if !christmasWasActive {
+            applyChristmasStats(ChristmasMemory.getStats())
+        }
+
+        doorCheckTimer += dt
+        if doorCheckTimer < 5000 { return }
+        doorCheckTimer = 0
+        // Let the flock land and say hello first, and never open a door to an empty room
+        if launchTimer < 20000 || doorCooldown > 0 || humanAway { return }
+        guard let door = christmasStats.nextDoor(dueDoor: ChristmasSeason.dueDoor()) else { return }
+        // The main sheep reads the door out: it needs the stage, and to be on
+        // its feet and free (a bored sheep is woken up for the occasion)
+        guard main.canBeDirected, !mainBubble.visible, activeConversation == nil,
+              groupActivity == nil, spectacle == nil else { return }
+        main.resetActivity()
+
+        applyChristmasStats(ChristmasMemory.openDoor(door))
+        try? Memory.appendJournal("*Opened door \(door) of the julekalender.*")
+        presentDoor(door)
+        // Missed days are caught up one door at a time
+        doorCooldown = Self.DOOR_CATCH_UP_GAP_MS
+    }
+
+    /// The main sheep reads a door out and whatever was behind it happens.
+    private func presentDoor(_ door: Int) {
+        guard JULEKALENDER_DOORS.indices.contains(door - 1) else { return }
+        let entry = JULEKALENDER_DOORS[door - 1]
+        Log.info("flock", "Julekalender: door \(door)")
+        christmasTheme.showHud()
+        mainBubble.show("Luke \(door): \(entry.line)", duration: 7000)
+
+        switch entry.effect {
+        case .quip:
+            break
+        case .animation(let animation):
+            main.playAnimation(animation)
+        case .juletregang:
+            startChristmasActivity(.juletregang)
+        case .giftExchange:
+            startChristmasActivity(.giftExchange)
+        case .sleigh:
+            startSpectacle(.sleigh)
+        case .flurry:
+            weatherEffects.startFlurry(Self.DOOR_FLURRY_MS)
+        case .lightShow:
+            christmasTheme.startLightShow()
+        }
+    }
+
+    /// Debug: read out the next door (1, 2, … 24, 1, …) without opening it
+    /// in the real calendar.
+    func previewNextDoor() {
+        previewDoor = previewDoor % ChristmasSeason.doorCount + 1
+        presentDoor(previewDoor)
     }
 
     /// Called by main.ts when break reminder fires on main sheep
@@ -1116,6 +1276,18 @@ final class Flock {
             easterTheme.resetEggs()
         }
 
+        if activity.type == .giftExchange {
+            if let opened = activity.giftsOpened, opened > 0 {
+                applyChristmasStats(ChristmasMemory.recordGifts(opened))
+                christmasTheme.showHud()
+            }
+            christmasTheme.resetPresents()
+        }
+        if activity.type == .juletregang && !cancelledEarly {
+            applyChristmasStats(ChristmasMemory.recordCarol())
+            christmasTheme.showHud()
+        }
+
         if !cancelledEarly {
             let present = stillPresent(activity.participants)
             if !present.isEmpty { FriendMemory.recordGroupActivity(present, activity.type.rawValue) }
@@ -1221,7 +1393,8 @@ final class Flock {
                     easterTheme: easterTheme,
                     recentEasterHunt: easterTheme.hasRecentHuntBuzz(),
                     eggPaintingActive: a.sheep.state == .idleEggPainting || b.sheep.state == .idleEggPainting,
-                    summerActive: summerTheme.active
+                    summerActive: summerTheme.active,
+                    christmasActive: christmasTheme.active
                 )
                 guard let script = pickConversation(a.id, b.id, ctx) else { continue }
 
@@ -1369,6 +1542,8 @@ final class Flock {
                     pool = Self.EASTER_IDLE_QUIPS
                 } else if summerTheme.active && SimRandom.next() < 0.35 {
                     pool = SUMMER_IDLE_QUIPS
+                } else if christmasTheme.active && SimRandom.next() < 0.35 {
+                    pool = CHRISTMAS_IDLE_QUIPS
                 }
                 let quip = pool[SimRandom.int(pool.count)]
                 entry.bubble.show(quip, duration: 5000)
@@ -1388,6 +1563,17 @@ final class Flock {
         // Weak on both ends: the sheep owns this closure, and Flock owns the sheep.
         sheep.seasonalOverlay = { [weak self, weak sheep] ctx, x, y, size, facingRight, state in
             guard let self, let sheep else { return }
+            // Christmas: a nisselue on every bare head, glued on through
+            // spins and backflips; the pompom bobs with each stride.
+            if self.christmasTheme.active && !sheep.wearsHeadwear {
+                let striding = state == .walk || state == .zoom || state == .stampede
+                    || state == .idleZooming || state == .leaving
+                let bob = striding ? Int(sheep.stateTimer / 250) % 2 : 0
+                ctx.save()
+                sheep.applyPose(ctx)
+                drawSantaHat(ctx, x, y, size, facingRight, spriteKey: sheep.getSpriteKey(), bob: bob)
+                ctx.restore()
+            }
             if !self.easterTheme.shouldShowBasket(sheep.id) { return }
             let eggCount = max(1, self.easterTheme.getBasketEggCount(sheep.id))
             drawEasterBasket(ctx, x, y, size, facingRight, state,

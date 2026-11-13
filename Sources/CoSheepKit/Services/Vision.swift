@@ -365,7 +365,8 @@ final class VisionPipeline {
 
     func generateCommentary(_ screenText: String, context: String, recentJournal: String) async throws -> String {
         let weatherCtx = await weather.getWeatherContext()
-        let systemPrompt = Personality.getSystemPrompt(recentJournal: recentJournal, weatherContext: weatherCtx)
+        let systemPrompt = Personality.getSystemPrompt(
+            recentJournal: recentJournal, weatherContext: weatherCtx, seasonContext: Personality.getSeasonContext())
         let screenText = truncateUTF8(screenText, maxBytes: Self.OCR_BUDGET)
         let prompt = "Context: \(context)\n\nText visible on the screen (OCR):\n\(screenText)\n\n\(Self.COMMENTARY_PROMPT)"
         return try await generateWithTimeout("commentary", system: systemPrompt, prompt: prompt)
@@ -379,7 +380,8 @@ final class VisionPipeline {
         let userMessage = truncateUTF8(userMessage, maxBytes: Self.CHAT_MSG_BUDGET)
         let recentContext = (try? Memory.getRecentContext(query: userMessage)) ?? ""
         let weatherCtx = await weather.getWeatherContext()
-        let systemPrompt = Personality.getChatPrompt(recentContext: recentContext, weatherContext: weatherCtx)
+        let systemPrompt = Personality.getChatPrompt(
+            recentContext: recentContext, weatherContext: weatherCtx, seasonContext: Personality.getSeasonContext())
 
         // Replay the (frontend-capped) session transcript as a native Transcript
         // in the model. Sheep turns go in as the JSON shape the model is asked
@@ -434,7 +436,8 @@ final class VisionPipeline {
     ) async throws -> String {
         let systemPrompt = Self.friendChatSystemPrompt(
             friendAId: friendAId, friendAName: friendAName, friendAPersonality: friendAPersonality,
-            friendBId: friendBId, friendBName: friendBName, friendBPersonality: friendBPersonality)
+            friendBId: friendBId, friendBName: friendBName, friendBPersonality: friendBPersonality,
+            seasonContext: Personality.getSeasonContext())
 
         let userMsg = if let topic {
             "Generate a conversation between \(friendAName) and \(friendBName). Context: \(topic)"
@@ -450,16 +453,18 @@ final class VisionPipeline {
 
     static func friendChatSystemPrompt(
         friendAId: String, friendAName: String, friendAPersonality: String,
-        friendBId: String, friendBName: String, friendBPersonality: String
+        friendBId: String, friendBName: String, friendBPersonality: String,
+        seasonContext: String = ""
     ) -> String {
         let language = Config.getLanguage()
+        let seasonLine = seasonContext.isEmpty ? "" : "\n\(seasonContext) They may bring it up, but don't force it."
         let memorySection = "\(FriendMemory.getChatContext(friendAId, friendBId))\n\(FriendMemory.getChatContext(friendBId, friendAId))"
 
         // The template sits at column 0 on purpose (indentation is content).
         return #"""
 You are writing a short conversation between two desktop sheep friends.
 \#(friendAName) is \#(friendAPersonality). \#(friendBName) is \#(friendBPersonality).
-Write a 2-4 line exchange. Keep it SHORT, funny, and in character. They are pixel sheep living on someone's desktop.
+Write a 2-4 line exchange. Keep it SHORT, funny, and in character. They are pixel sheep living on someone's desktop.\#(seasonLine)
 
 LANGUAGE: Write in \#(language).
 
