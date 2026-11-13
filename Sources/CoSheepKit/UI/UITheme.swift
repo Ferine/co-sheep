@@ -3,6 +3,11 @@ import SwiftUI
 
 /// Shared look of the aux windows: native controls, tinted with the pages'
 /// pink accent.
+///
+/// Liquid Glass belongs to the layer of controls that floats above content:
+/// the title bar, toolbars, and the action bar at the bottom of a dialog
+/// (`dialogBar`). Content itself (forms, lists, cards) stays plain; a card is
+/// a filled `UITheme.card` shape, never glass on glass.
 enum UITheme {
     /// The pages' accent, #e94560.
     static let accent = Color(red: 0xe9 / 255, green: 0x45 / 255, blue: 0x60 / 255)
@@ -10,6 +15,35 @@ enum UITheme {
     static let success = Color(red: 0x4e / 255, green: 0xcc / 255, blue: 0xa3 / 255)
     /// The dark canvas the sheep preview sits on, #16213e.
     static let previewBackground = Color(red: 0x16 / 255, green: 0x21 / 255, blue: 0x3e / 255)
+
+    /// The corner shape of a free-standing content card: the radius of the
+    /// grouped form's own sections, so cards and sections read as one family.
+    static let card = RoundedRectangle(cornerRadius: 12, style: .continuous)
+
+    /// A card nested inside a form section: tighter, so its corners stay
+    /// concentric with the section around it.
+    static let nestedCard = RoundedRectangle(cornerRadius: 7, style: .continuous)
+
+    /// Outer margin of content that isn't a form (forms bring their own).
+    static let margin: CGFloat = 20
+}
+
+extension View {
+    /// The row of actions at the bottom of a dialog (Cancel / Save). It
+    /// floats over the scrolling content as Liquid Glass, and the content
+    /// dissolves beneath it through the scroll edge effect, instead of
+    /// sitting in an opaque strip under a divider. Give its buttons the
+    /// `.glass` / `.glassProminent` styles.
+    func dialogBar(@ViewBuilder _ bar: () -> some View) -> some View {
+        safeAreaBar(edge: .bottom) {
+            GlassEffectContainer {
+                HStack(spacing: 12) { bar() }
+            }
+            .controlSize(.large)
+            .padding(.horizontal, UITheme.margin)
+            .padding(.vertical, 12)
+        }
+    }
 }
 
 /// A window's reload contract: `WindowManager` calls `reload()` each time the
@@ -32,31 +66,6 @@ final class TimedFlag {
             guard !Task.isCancelled else { return }
             self?.isOn = false
         }
-    }
-}
-
-/// The page's `<h1>` (+ optional subtitle).
-struct WindowHeading: View {
-    let title: String
-    var subtitle: String?
-
-    init(_ title: String, subtitle: String? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.title3.bold())
-                .foregroundStyle(UITheme.accent)
-            if let subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

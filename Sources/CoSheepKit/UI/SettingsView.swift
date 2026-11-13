@@ -136,134 +136,127 @@ struct SettingsView: View {
     @Bindable var model: SettingsModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            WindowHeading("co-sheep Settings")
-                .padding([.horizontal, .top], 20)
+        Form {
+            Section {
+                TextField("Sheep Name", text: $model.name, prompt: Text("Name your sheep..."))
+            }
 
-            Form {
-                Section {
-                    TextField("Sheep Name", text: $model.name, prompt: Text("Name your sheep..."))
-                }
+            Section("AI") {
+                Text("Runs fully on-device with Apple Intelligence — free, private, nothing leaves your Mac. Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
-                Section("AI") {
-                    Text("Runs fully on-device with Apple Intelligence — free, private, nothing leaves your Mac. Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    VStack(spacing: 4) {
-                        HStack {
-                            Text("Commentary Interval")
-                            Spacer()
-                            Text(model.intervalLabel)
-                                .monospacedDigit()
-                                .foregroundStyle(UITheme.accent)
-                        }
-                        Slider(
-                            value: $model.intervalSecs,
-                            in: SettingsModel.intervalRange,
-                            step: SettingsModel.intervalStep
-                        ) { Text("Commentary Interval") }
-                            .labelsHidden()
+            Section {
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Commentary Interval")
+                        Spacer()
+                        Text(model.intervalLabel)
+                            .monospacedDigit()
+                            .foregroundStyle(UITheme.accent)
                     }
-                }
-
-                Section {
-                    Picker("Personality", selection: $model.personality) {
-                        ForEach(ChoiceOption.including(model.personality, in: SettingsModel.personalities)) {
-                            Text($0.label).tag($0.value)
-                        }
-                    }
-                } footer: {
-                    Text(model.personalityDescription).italic()
-                }
-
-                Section {
-                    Picker("Language", selection: $model.language) {
-                        ForEach(ChoiceOption.including(model.language, in: SettingsModel.languages)) {
-                            Text($0.label).tag($0.value)
-                        }
-                    }
-                } footer: {
-                    Text("The language your sheep speaks in.")
-                }
-
-                Section {
-                    TextField(
-                        "Weather Location", text: $model.weatherLocation,
-                        prompt: Text("Oslo, London, Tokyo..."))
-                } footer: {
-                    Text("City name for weather awareness. Leave empty to disable.")
-                }
-
-                Section {
-                    Picker("Easter Mode", selection: $model.easterMode) {
-                        ForEach(ChoiceOption.including(model.easterMode, in: SettingsModel.easterModes)) {
-                            Text($0.label).tag($0.value)
-                        }
-                    }
-                } footer: {
-                    Text("Useful for testing the seasonal mode without waiting for the calendar.")
-                }
-
-                Section {
-                    Picker("Summer Mode", selection: $model.summerMode) {
-                        ForEach(ChoiceOption.including(model.summerMode, in: SettingsModel.summerModes)) {
-                            Text($0.label).tag($0.value)
-                        }
-                    }
-                } footer: {
-                    Text("Auto triggers in June–August when the weather is clear and warm (needs a weather location).")
-                }
-
-                Section {
-                    Picker("Christmas Mode", selection: $model.christmasMode) {
-                        ForEach(ChoiceOption.including(model.christmasMode, in: SettingsModel.christmasModes)) {
-                            Text($0.label).tag($0.value)
-                        }
-                    }
-                } footer: {
-                    Text("Tree, lights, snow and nisseluer, plus a julekalender door every day until Christmas Eve.")
-                }
-
-                Section {
-                    Toggle("Break Reminders", isOn: $model.breakReminders)
-                } footer: {
-                    Text("Nudge me to take breaks after 45 min of continuous work.")
-                }
-
-                Section {
-                    Toggle("Show agent lambs", isOn: $model.herdEnabled)
-                    Toggle("Shepherd commentary", isOn: $model.shepherdCommentary)
-                } header: {
-                    Text("Agent Herd")
-                } footer: {
-                    Text("Every Claude Code session becomes a lamb. Connect Claude Code from the co-sheep menu.")
+                    Slider(
+                        value: $model.intervalSecs,
+                        in: SettingsModel.intervalRange,
+                        step: SettingsModel.intervalStep
+                    ) { Text("Commentary Interval") }
+                        .labelsHidden()
                 }
             }
-            .formStyle(.grouped)
 
-            Divider()
-
-            VStack(spacing: 8) {
-                HStack {
-                    Button("Cancel") { WindowManager.shared.close(.settings) }
-                        .keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Save") { model.save() }
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
+            Section {
+                Picker("Personality", selection: $model.personality) {
+                    ForEach(ChoiceOption.including(model.personality, in: SettingsModel.personalities)) {
+                        Text($0.label).tag($0.value)
+                    }
                 }
+            } footer: {
+                Text(model.personalityDescription).italic()
+            }
+
+            Section {
+                Picker("Language", selection: $model.language) {
+                    ForEach(ChoiceOption.including(model.language, in: SettingsModel.languages)) {
+                        Text($0.label).tag($0.value)
+                    }
+                }
+            } footer: {
+                Text("The language your sheep speaks in.")
+            }
+
+            Section {
+                TextField(
+                    "Weather Location", text: $model.weatherLocation,
+                    prompt: Text("Oslo, London, Tokyo..."))
+            } footer: {
+                Text("City name for weather awareness. Leave empty to disable.")
+            }
+
+            Section {
+                Picker("Easter Mode", selection: $model.easterMode) {
+                    ForEach(ChoiceOption.including(model.easterMode, in: SettingsModel.easterModes)) {
+                        Text($0.label).tag($0.value)
+                    }
+                }
+            } footer: {
+                Text("Useful for testing the seasonal mode without waiting for the calendar.")
+            }
+
+            Section {
+                Picker("Summer Mode", selection: $model.summerMode) {
+                    ForEach(ChoiceOption.including(model.summerMode, in: SettingsModel.summerModes)) {
+                        Text($0.label).tag($0.value)
+                    }
+                }
+            } footer: {
+                Text("Auto triggers in June–August when the weather is clear and warm (needs a weather location).")
+            }
+
+            Section {
+                Picker("Christmas Mode", selection: $model.christmasMode) {
+                    ForEach(ChoiceOption.including(model.christmasMode, in: SettingsModel.christmasModes)) {
+                        Text($0.label).tag($0.value)
+                    }
+                }
+            } footer: {
+                Text("Tree, lights, snow and nisseluer, plus a julekalender door every day until Christmas Eve.")
+            }
+
+            Section {
+                Toggle("Break Reminders", isOn: $model.breakReminders)
+            } footer: {
+                Text("Nudge me to take breaks after 45 min of continuous work.")
+            }
+
+            Section {
+                Toggle("Show agent lambs", isOn: $model.herdEnabled)
+                Toggle("Shepherd commentary", isOn: $model.shepherdCommentary)
+            } header: {
+                Text("Agent Herd")
+            } footer: {
+                Text("Every Claude Code session becomes a lamb. Connect Claude Code from the co-sheep menu.")
+            }
+        }
+        .formStyle(.grouped)
+        .tint(UITheme.accent)
+        .dialogBar {
+            Button("Cancel") { WindowManager.shared.close(.settings) }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.glass)
+            Group {
                 if let error = model.errorMessage {
                     Text(error).font(.callout).foregroundStyle(.red)
                 } else {
                     FadingMessage(text: "Settings saved.", visible: model.saved.isOn)
                 }
             }
-            .padding(16)
+            .frame(maxWidth: .infinity)
+            Button("Save") { model.save() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.glassProminent)
+                .tint(UITheme.accent)
         }
-        .tint(UITheme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

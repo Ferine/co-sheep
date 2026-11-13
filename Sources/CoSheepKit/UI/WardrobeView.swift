@@ -78,12 +78,10 @@ struct WardrobeView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
-        VStack(spacing: 14) {
-            WindowHeading("Wardrobe")
+        ScrollView {
+            VStack(spacing: 16) {
+                preview
 
-            preview
-
-            ScrollView {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(model.accessories, id: \.id) { acc in
                         Toggle(isOn: model.binding(for: acc.id)) {
@@ -97,26 +95,27 @@ struct WardrobeView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .toggleStyle(.button)
+                        .controlSize(.large)
                     }
                 }
-                .padding(2)
             }
-
-            VStack(spacing: 8) {
-                Button("Save") { model.save() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
-                    .keyboardShortcut(.defaultAction)
+            .padding(UITheme.margin)
+        }
+        .tint(UITheme.accent)
+        .dialogBar {
+            Group {
                 if let error = model.errorMessage {
                     Text(error).font(.callout).foregroundStyle(.red)
                 } else {
                     FadingMessage(text: "Accessories saved!", visible: model.saved.isOn)
                 }
             }
+            .frame(maxWidth: .infinity)
+            Button("Save") { model.save() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.glassProminent)
+                .tint(UITheme.accent)
         }
-        .padding(20)
-        .tint(UITheme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -130,8 +129,7 @@ struct WardrobeView: View {
             }
         }
         .frame(width: SheepPreview.size.width, height: SheepPreview.size.height)
-        .background(UITheme.previewBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 2))
+        .background(UITheme.previewBackground, in: UITheme.card)
         .accessibilityLabel("Sheep preview")
     }
 }

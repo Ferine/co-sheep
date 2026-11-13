@@ -36,7 +36,7 @@ struct NamingView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Baaaa!")
-                .font(.title3.bold())
+                .font(.title2.bold())
                 .foregroundStyle(UITheme.accent)
             Text("I just parachuted onto your desktop! What's my name?")
                 .font(.callout)
@@ -44,10 +44,12 @@ struct NamingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
+            // A dialog's own controls: standard push buttons, at the size
+            // where the system draws them as capsules.
             HStack(spacing: 8) {
                 TextField("Name your sheep...", text: $model.name)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 200)
+                    .frame(width: 210)
                     .focused($focused)
                     .onSubmit(submit)
                 // Return is handled by the field's `onSubmit`; a default-button
@@ -55,12 +57,13 @@ struct NamingView: View {
                 Button("OK", action: submit)
                     .buttonStyle(.borderedProminent)
             }
+            .controlSize(.large)
 
             if let error = model.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.red)
             }
         }
-        .padding(20)
+        .padding(UITheme.margin)
         .tint(UITheme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { focused = true }

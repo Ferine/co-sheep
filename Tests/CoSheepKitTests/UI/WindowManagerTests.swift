@@ -16,8 +16,9 @@ extension BrainTests {
             return try body()
         }
 
+        /// The area below the title bar / toolbar: what the content can use.
         private func contentSize(_ window: NSWindow) -> NSSize {
-            window.contentRect(forFrameRect: window.frame).size
+            WindowManager.layoutSize(of: window)
         }
 
         @Test func everyKindOpensWithTheTauriTitleSizeAndResizability() {
@@ -46,6 +47,106 @@ extension BrainTests {
                         #expect(window.level == .floating)
                         #expect(window.isVisible)
                     }
+                }
+            }
+        }
+
+        // MARK: Liquid Glass chrome
+
+        @Test func contentRunsUnderATitleBarWithNoBackgroundOfItsOwn() {
+            withWindows {
+                for kind in WindowKind.allCases {
+                    withBrainRoot { _ in
+                        manager.open(kind)
+                        guard let window = manager.window(for: kind) else {
+                            Issue.record("\(kind.label) did not open")
+                            return
+                        }
+                        #expect(window.styleMask.contains(.fullSizeContentView), "\(kind.label)")
+                        #expect(window.titlebarAppearsTransparent, "\(kind.label)")
+                        // The frame also covers the bar; the layout area is what the page was sized for
+                        let bar = WindowManager.barHeight(of: window)
+                        #expect(bar >= 20, "\(kind.label)")
+                        #expect(window.frame.height == kind.size.height + bar, "\(kind.label)")
+                        #expect(window.contentView?.frame.size == window.frame.size, "\(kind.label)")
+                    }
+                }
+            }
+        }
+
+        @Test func theReadOnlyWindowsPutRefreshInAGlassToolbarAndTheFormsHaveNone() {
+            withWindows {
+                for kind in WindowKind.allCases {
+                    withBrainRoot { _ in
+                        manager.open(kind)
+                        let toolbar = manager.window(for: kind)?.toolbar
+                        switch kind {
+                        case .memory, .friendMemory:
+                            #expect(toolbar?.items.count == 1, "\(kind.label)")
+                        case .settings, .friends, .wardrobe, .naming:
+                            #expect(toolbar == nil, "\(kind.label)")
+                        }
+                    }
+                }
+            }
+        }
+
+        @Test func aToolbarMakesTheBarTallerNotTheContentShorter() {
+            withWindows {
+                withBrainRoot { _ in
+                    manager.open(.settings)
+                    manager.open(.memory)
+                    let plain = WindowManager.barHeight(of: manager.window(for: .settings)!)
+                    let withToolbar = WindowManager.barHeight(of: manager.window(for: .memory)!)
+                    #expect(withToolbar > plain)
+                    #expect(contentSize(manager.window(for: .memory)!) == WindowKind.memory.size)
+                }
+            }
+        }
+
+        @Test func titleAndSubtitleReachTheWindowThroughTheBridge() {
+            #expect(WindowKind.memory.subtitle == "What your sheep knows, believes, and obsesses over")
+            #expect(WindowKind.allCases.filter { $0.subtitle != nil } == [.memory])
+            withWindows {
+                withBrainRoot { _ in
+                    manager.open(.memory)
+                    manager.open(.settings)
+                    // SwiftUI applies them on its next update
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+                    #expect(manager.window(for: .memory)?.title == "Sheep's Brain")
+                    #expect(manager.window(for: .memory)?.subtitle == WindowKind.memory.subtitle)
+                    #expect(manager.window(for: .settings)?.title == "co-sheep Settings")
+                    #expect(manager.window(for: .settings)?.subtitle == "")
+                }
+            }
+        }
+
+        @Test func resizableWindowsCannotBeDraggedBelowTheirMinimum() throws {
+            try withWindows {
+                try withBrainRoot { _ in
+                    for kind in [WindowKind.memory, .friendMemory] {
+                        manager.open(kind)
+                        let window = try #require(manager.window(for: kind))
+                        let minSize = try #require(kind.minSize)
+                        let bar = WindowManager.barHeight(of: window)
+                        // The minimum is for the area below the bar
+                        #expect(manager.windowWillResize(window, to: NSSize(width: 50, height: 50))
+                            == NSSize(width: minSize.width, height: minSize.height + bar))
+                        #expect(manager.windowWillResize(window, to: NSSize(width: 900, height: 50))
+                            == NSSize(width: 900, height: minSize.height + bar))
+                        #expect(manager.windowWillResize(window, to: NSSize(width: 900, height: 900))
+                            == NSSize(width: 900, height: 900))
+
+                        // It holds after SwiftUI has had its say (the hosting
+                        // controller zeroes `contentMinSize` on its own)
+                        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+                        #expect(manager.windowWillResize(window, to: .zero).width == minSize.width)
+                    }
+                    // Fixed-size windows and strangers pass through untouched
+                    manager.open(.settings)
+                    let settings = try #require(manager.window(for: .settings))
+                    #expect(manager.windowWillResize(settings, to: NSSize(width: 1, height: 1)) == NSSize(width: 1, height: 1))
+                    #expect(manager.windowWillResize(NSWindow(), to: NSSize(width: 2, height: 2)) == NSSize(width: 2, height: 2))
                 }
             }
         }

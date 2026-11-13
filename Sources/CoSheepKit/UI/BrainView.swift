@@ -112,48 +112,48 @@ struct BrainView: View {
     @Bindable var model: BrainModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WindowHeading(
-                "Sheep's Brain", subtitle: "What your sheep knows, believes, and obsesses over")
-
-            GroupBox {
-                HStack(spacing: 18) {
-                    stat("Comments", model.display.totalComments)
-                    stat("Interactions", model.display.totalInteractions)
-                    stat("Opinions", model.display.opinions.count)
-                    Spacer()
-                }
-                .padding(2)
-            }
-
-            HStack {
-                Picker("", selection: $model.tab) {
-                    ForEach(BrainModel.Tab.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-
-                Spacer()
-
-                Button("Refresh") { model.reload() }
-            }
-
+        // The picked view fills the window and scrolls under the bars: the
+        // toolbar (Refresh, in glass), the view switcher, and the status line.
+        Group {
             switch model.tab {
             case .opinions: opinions
             case .counts: counts
             case .journal: journal
             }
         }
-        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .tint(UITheme.accent)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .safeAreaBar(edge: .top) {
+            Picker("View", selection: $model.tab) {
+                ForEach(BrainModel.Tab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .controlSize(.large)
+            .padding(.vertical, 8)
+        }
+        .safeAreaBar(edge: .bottom) {
+            HStack(spacing: 18) {
+                stat("Comments", model.display.totalComments)
+                stat("Interactions", model.display.totalInteractions)
+                stat("Opinions", model.display.opinions.count)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Refresh", systemImage: "arrow.clockwise") { model.reload() }
+                    .help("Refresh")
+            }
+        }
     }
 
     private func stat(_ label: String, _ value: Int) -> some View {
         HStack(spacing: 4) {
             Text("\(label):").foregroundStyle(.secondary)
-            Text("\(value)").bold().foregroundStyle(UITheme.accent)
+            Text("\(value)").bold().monospacedDigit().foregroundStyle(UITheme.accent)
         }
         .font(.callout)
     }
@@ -163,7 +163,7 @@ struct BrainView: View {
     @ViewBuilder private var opinions: some View {
         if model.display.opinions.isEmpty {
             EmptyNote("No opinions yet. The sheep will start forming beliefs as it watches you.")
-            Spacer(minLength: 0)
+                .padding(UITheme.margin)
         } else {
             List(model.sortedOpinions) { op in
                 OpinionRow(op: op)
@@ -176,7 +176,7 @@ struct BrainView: View {
     @ViewBuilder private var counts: some View {
         if model.display.todayCounts.isEmpty {
             EmptyNote("No tallies yet today.")
-            Spacer(minLength: 0)
+                .padding(UITheme.margin)
         } else {
             List(model.sortedCounts, id: \.key) { row in
                 HStack {
@@ -198,13 +198,14 @@ struct BrainView: View {
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
+                    .padding(14)
+                    .background(.quaternary.opacity(0.5), in: UITheme.card)
+                    .padding(.horizontal, UITheme.margin)
+                    .padding(.vertical, 4)
             }
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
         } else {
             EmptyNote("No diary entries today.")
-            Spacer(minLength: 0)
+                .padding(UITheme.margin)
         }
     }
 }
@@ -261,6 +262,6 @@ private struct CategoryTag: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .foregroundStyle(color)
-            .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+            .background(color.opacity(0.18), in: Capsule())
     }
 }

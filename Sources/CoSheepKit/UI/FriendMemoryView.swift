@@ -76,31 +76,34 @@ struct FriendMemoryView: View {
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                WindowHeading("Friend Relationships")
-                Button("Refresh") { model.reload() }
-            }
-
-            if model.data.isEmpty {
-                EmptyNote("No friend data yet. Friends build memories over time.")
-            } else {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(model.sortedIds, id: \.self) { id in
-                        card(id)
+        // One scrolling form: the friend cards, then the picked friend's
+        // details. It runs under the toolbar, where Refresh sits in glass.
+        Form {
+            Section {
+                if model.data.isEmpty {
+                    EmptyNote("No friend data yet. Friends build memories over time.")
+                } else {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(model.sortedIds, id: \.self) { id in
+                            card(id)
+                        }
                     }
                 }
             }
 
             if let brain = model.brain {
                 detail(brain)
-            } else {
-                Spacer(minLength: 0)
             }
         }
-        .padding(20)
+        .formStyle(.grouped)
         .tint(UITheme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Refresh", systemImage: "arrow.clockwise") { model.reload() }
+                    .help("Refresh")
+            }
+        }
     }
 
     private func card(_ id: String) -> some View {
@@ -116,19 +119,22 @@ struct FriendMemoryView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
             .padding(.horizontal, 8)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(selected ? AnyShapeStyle(UITheme.accent) : AnyShapeStyle(.separator), lineWidth: 2))
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background(
+                selected ? AnyShapeStyle(UITheme.accent.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.6)),
+                in: UITheme.nestedCard)
+            .overlay {
+                if selected { UITheme.nestedCard.strokeBorder(UITheme.accent, lineWidth: 1.5) }
+            }
+            .contentShape(UITheme.nestedCard)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func detail(_ brain: FriendBrain) -> some View {
-        Form {
+    @ViewBuilder private func detail(_ brain: FriendBrain) -> some View {
+        Group {
             Section(brain.name) {
                 stat("Mood", brain.mood)
                 stat("Conversations (today)", brain.stats.conversationsToday)
@@ -172,7 +178,6 @@ struct FriendMemoryView: View {
                 }
             }
         }
-        .formStyle(.grouped)
     }
 
     private func stat(_ label: String, _ value: String) -> some View {

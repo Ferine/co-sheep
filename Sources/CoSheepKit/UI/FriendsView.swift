@@ -151,31 +151,49 @@ struct FriendsView: View {
     @Bindable var model: FriendsModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WindowHeading(
-                "Manage Friends",
-                subtitle: "Good Colleague is always here. Add up to 4 more friends.")
-
-            List {
+        Form {
+            Section {
                 goodColleagueRow
                 ForEach(model.friends, id: \.id) { friend in
                     FriendRow(model: model, friend: friend)
                 }
+            } header: {
+                Text("The Flock")
+            } footer: {
+                Text("Good Colleague is always here. Add up to 4 more friends.")
             }
-            .listStyle(.inset)
 
-            Divider()
-
-            addForm
-
+            Section("Add New Friend") {
+                TextField("Name", text: $model.newName, prompt: Text("Enter a name..."))
+                    .onSubmit { model.add() }
+                Picker("Personality", selection: $model.newPersonality) {
+                    ForEach(FriendsModel.personalities) { Text($0.label).tag($0.value) }
+                }
+                Picker("Color", selection: $model.newColor) {
+                    ForEach(FriendsModel.colors) { opt in
+                        Label {
+                            Text(opt.label)
+                        } icon: {
+                            Image(systemName: "circle.fill").foregroundStyle(FriendsModel.dotColor(opt.value))
+                        }
+                        .tag(opt.value)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .tint(UITheme.accent)
+        .dialogBar {
             Text(model.status)
                 .font(.callout)
                 .foregroundStyle(model.statusIsError ? Color.red : UITheme.success)
-                .frame(maxWidth: .infinity, minHeight: 18)
-                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(model.addButtonTitle) { model.add() }
+                .buttonStyle(.glassProminent)
+                .tint(UITheme.accent)
+                .disabled(!model.canAdd)
         }
-        .padding(20)
-        .tint(UITheme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .alert(
             "Remove \(model.pendingRemoval?.name ?? "this friend")?",
@@ -207,38 +225,6 @@ struct FriendsView: View {
         }
         .padding(.vertical, 4)
     }
-
-    private var addForm: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Add New Friend")
-                .font(.headline)
-
-            Form {
-                TextField("Name", text: $model.newName, prompt: Text("Enter a name..."))
-                    .onSubmit { model.add() }
-                Picker("Personality", selection: $model.newPersonality) {
-                    ForEach(FriendsModel.personalities) { Text($0.label).tag($0.value) }
-                }
-                Picker("Color", selection: $model.newColor) {
-                    ForEach(FriendsModel.colors) { opt in
-                        Label {
-                            Text(opt.label)
-                        } icon: {
-                            Image(systemName: "circle.fill").foregroundStyle(FriendsModel.dotColor(opt.value))
-                        }
-                        .tag(opt.value)
-                    }
-                }
-            }
-            .formStyle(.columns)
-
-            Button(model.addButtonTitle) { model.add() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
-                .disabled(!model.canAdd)
-        }
-    }
 }
 
 private struct FriendRow: View {
@@ -257,14 +243,20 @@ private struct FriendRow: View {
                     .font(.caption2)
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
-                Button("Acc.") {
-                    model.panelBinding(for: friend.id).wrappedValue.toggle()
+                Toggle(isOn: model.panelBinding(for: friend.id)) {
+                    Label("Accessories", systemImage: "hanger")
                 }
+                .toggleStyle(.button)
                 .help("Accessories")
-                .controlSize(.small)
-                Button("Remove") { model.pendingRemoval = friend }
-                    .controlSize(.small)
+                Button(role: .destructive) {
+                    model.pendingRemoval = friend
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+                .help("Remove \(friend.name)")
             }
+            .labelStyle(.iconOnly)
+            .buttonBorderShape(.circle)
 
             if model.openPanels.contains(friend.id) {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
@@ -274,8 +266,10 @@ private struct FriendRow: View {
                             .controlSize(.small)
                     }
                 }
+                .buttonBorderShape(.capsule)
                 Button("Save Accessories") { model.saveAccessories(for: friend) }
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
                     .controlSize(.small)
             }
         }
