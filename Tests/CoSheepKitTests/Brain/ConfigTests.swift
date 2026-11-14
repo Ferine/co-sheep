@@ -230,9 +230,7 @@ extension BrainTests {
                 #expect(Config.getIntervalSecs() == 150)
                 #expect(Config.getPersonality() == "snarky")
                 #expect(Config.getLanguage() == "nynorsk")
-                #expect(Config.getBreakReminders())
                 #expect(Config.getWeatherLocation() == "")
-                #expect(Config.getEasterMode() == "auto")
             }
         }
 
@@ -248,8 +246,6 @@ extension BrainTests {
                 #expect(Config.getIntervalSecs() == 42)
                 #expect(Config.getPersonality() == "chaotic")
                 #expect(Config.getLanguage() == "german")
-                #expect(!Config.getBreakReminders())
-                #expect(Config.getEasterMode() == "on")
             }
         }
     }

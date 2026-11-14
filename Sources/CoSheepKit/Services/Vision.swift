@@ -14,12 +14,30 @@ nonisolated struct VisionError: Error, CustomStringConvertible, Equatable {
     init(_ description: String) { self.description = description }
 }
 
-/// ex-`ScreenClassification`. serde required all three fields, so a missing
-/// `category` fails the parse even though nothing reads it.
+/// ex-`ScreenClassification`. The prompt asks for a `category` (naming one
+/// helps the model commit to a guess) but nothing reads it, so a reply
+/// without one is still a classification rather than a skipped tick.
 nonisolated struct ScreenClassification: Decodable, Equatable {
     var interesting: Bool
-    var category: String
+    var category: String = ""
     var summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case interesting, category, summary
+    }
+
+    init(interesting: Bool, category: String = "", summary: String) {
+        self.interesting = interesting
+        self.category = category
+        self.summary = summary
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        interesting = try c.decode(Bool.self, forKey: .interesting)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        summary = try c.decode(String.self, forKey: .summary)
+    }
 }
 
 /// ex-`ParsedResponse`: the sheep's line plus the optional brain updates.
@@ -57,10 +75,13 @@ final class VisionPipeline {
     /// ... and retried the prerequisites every 30 s.
     static let PREREQUISITE_RETRY_SECS = 30.0
 
-    /// The on-device model has a small (~4k token) context window — keep the
-    /// OCR dump well under it so the system prompt and journal still fit.
+    /// Bytes of OCR text sent to the model. The context window is small
+    /// (4,096 tokens on the first models, 8,192 on the macOS 27 ones;
+    /// `AppleAI.contextSize`), and 4000 bytes of screen text come to about
+    /// 1,350 tokens: room for the system prompt and journal either way.
+    /// Should a prompt not fit anyway, the call is retried with half of it.
     static let OCR_BUDGET = 4000
-    /// A pasted wall of text would blow the ~4k-token window — same guard the
+    /// A pasted wall of text would fill the context window — same guard the
     /// OCR path has via OCR_BUDGET.
     static let CHAT_MSG_BUDGET = 2000
 
@@ -175,6 +196,9 @@ final class VisionPipeline {
                     // the line (and the scene it interrupts) would repeat forever.
                     if Self.isCaptureError(error, msg) {
                         announceFailure("tick: capture", Self.SCREEN_ERROR_LINE)
+                    } else if (error as? LanguageModelError)?.kind == .unsupportedLanguage {
+                        // Every tick would fail the same way: say why, once.
+                        announceFailure("tick: language", Self.languageErrorLine(Config.getLanguage()))
                     }
                 }
             }
@@ -215,8 +239,8 @@ final class VisionPipeline {
                 "Apple Intelligence is turned off! Enable it in System Settings > Apple Intelligence & Siri, then I can think locally."
             case "modelNotReady":
                 "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."
-            case "deviceNotEligible", "requiresMacOS26":
-                "This Mac can't run Apple Intelligence — I need Apple Silicon and macOS 26 to think. Sorry!"
+            case "deviceNotEligible":
+                "This Mac can't run Apple Intelligence, and I need it to think. Sorry!"
             default:
                 "I can't reach the on-device Apple Intelligence model. Check System Settings > Apple Intelligence & Siri."
             }
@@ -255,26 +279,53 @@ final class VisionPipeline {
         events.sheepCommentary.emit(CommentaryEvent(text: text, animation: nil))
     }
 
-    /// Model calls in the pipeline and friend chat get the same deadline as
-    /// reflection: a hung call must not stall the loop, pin the tick flag
-    /// (blocking reflection) or leave the flock's AI-chat flag set.
+    /// Model calls in the pipeline, the chat and friend chat get the same
+    /// deadline as reflection: a hung call must not stall the loop, pin the
+    /// tick flag (blocking reflection), leave the flock's AI-chat flag set or
+    /// keep a chat waiting forever.
     static let MODEL_TIMEOUT_SECS = 120.0
 
-    private func generateWithTimeout(_ what: String, system: String, prompt: String) async throws -> String {
+    private func generateWithTimeout(
+        _ what: String, system: String, prompt: String, shape: ReplyShape? = nil
+    ) async throws -> String {
         let model = self.model
         return try await Reflect.withTimeout(
             seconds: Self.MODEL_TIMEOUT_SECS,
             onTimeout: LanguageModelError("\(what) timed out after \(Int(Self.MODEL_TIMEOUT_SECS))s")
         ) {
-            try await model.generate(system: system, prompt: prompt)
+            if let shape {
+                try await model.generate(system: system, prompt: prompt, shape: shape)
+            } else {
+                try await model.generate(system: system, prompt: prompt)
+            }
         }
+    }
+
+    /// Runs `body` with the OCR budget and, when the model says the prompt
+    /// did not fit its context window, once more with half of it: a comment
+    /// on half the screen beats a skipped tick.
+    private func withOCRBudget<T>(_ body: (Int) async throws -> T) async throws -> T {
+        do {
+            return try await body(Self.OCR_BUDGET)
+        } catch let error as LanguageModelError where error.kind == .contextTooLarge {
+            Log.info("vision", "prompt too large for the model's context: retrying with half the screen text")
+            return try await body(Self.OCR_BUDGET / 2)
+        }
+    }
+
+    /// Said when the model can't work in the configured language at all.
+    static func languageErrorLine(_ language: String) -> String {
+        "Apple Intelligence can't think in \(language) on this Mac. Pick another language in Settings and I'll have opinions again."
     }
 
     // MARK: - Pipeline (ex-`run_vision_pipeline`)
 
     /// One tick: capture, OCR, classify and, when interesting, comment. Sets
     /// the tick flag for the whole run, including when it throws.
-    func runVisionPipeline() async throws {
+    ///
+    /// `manual` is the menu's "Comment Now": the human asked for a comment,
+    /// so a boring screen gets one too instead of a silent journal line.
+    func runVisionPipeline(manual: Bool = false) async throws {
         activeTicks += 1
         defer { activeTicks -= 1 }
 
@@ -300,7 +351,7 @@ final class VisionPipeline {
             "vision",
             "classified: \(classification.summary) (\(classification.interesting ? "interesting" : "boring"))")
 
-        if !classification.interesting {
+        if !classification.interesting && !manual {
             Log.debug("vision", "Not interesting, skipping commentary")
             try? Memory.appendJournal("Glanced at screen. \(classification.summary). Nothing worth commenting on.")
             return
@@ -332,7 +383,7 @@ final class VisionPipeline {
 
         // Log to daily journal
         try? Memory.appendJournal(
-            "\(classification.summary)\n**Comment**: \(parsed.event.text) [animation: \(Self.debugAnimation(parsed.event.animation))]")
+            "\(classification.summary)\n**Comment**: \(parsed.event.text)\(Self.journalAnimation(parsed.event.animation))")
     }
 
     /// Opinion + daily counter side effects shared by the screen pipeline and chat.
@@ -349,17 +400,23 @@ final class VisionPipeline {
         }
     }
 
-    /// Rust `{:?}` of the `Option<String>` animation, as journalled.
-    nonisolated static func debugAnimation(_ animation: SheepAnimation?) -> String {
-        animation.map { "Some(\"\($0.rawValue)\")" } ?? "None"
+    /// The journal's note of the animation that went with a line:
+    /// " [animation: spin]", or nothing when the sheep stood still. (Journals
+    /// from before this read `[animation: Some("spin")]` / `[animation: None]`,
+    /// Rust's `{:?}` of the option.)
+    nonisolated static func journalAnimation(_ animation: SheepAnimation?) -> String {
+        animation.map { " [animation: \($0.rawValue)]" } ?? ""
     }
 
     // MARK: - On-device generation
 
     func classifyScreen(_ screenText: String) async throws -> ScreenClassification {
-        let screenText = truncateUTF8(screenText, maxBytes: Self.OCR_BUDGET)
-        let prompt = "Screen text:\n\(screenText)\n\n\(Self.CLASSIFY_PROMPT)"
-        let raw = try await generateWithTimeout("classify", system: Self.CLASSIFY_SYSTEM, prompt: prompt)
+        let raw = try await withOCRBudget { budget in
+            let screenText = truncateUTF8(screenText, maxBytes: budget)
+            let prompt = "Screen text:\n\(screenText)\n\n\(Self.CLASSIFY_PROMPT)"
+            return try await self.generateWithTimeout(
+                "classify", system: Self.CLASSIFY_SYSTEM, prompt: prompt, shape: .screenClassification)
+        }
         return try Self.parseClassification(raw)
     }
 
@@ -367,9 +424,12 @@ final class VisionPipeline {
         let weatherCtx = await weather.getWeatherContext()
         let systemPrompt = Personality.getSystemPrompt(
             recentJournal: recentJournal, weatherContext: weatherCtx, seasonContext: Personality.getSeasonContext())
-        let screenText = truncateUTF8(screenText, maxBytes: Self.OCR_BUDGET)
-        let prompt = "Context: \(context)\n\nText visible on the screen (OCR):\n\(screenText)\n\n\(Self.COMMENTARY_PROMPT)"
-        return try await generateWithTimeout("commentary", system: systemPrompt, prompt: prompt)
+        return try await withOCRBudget { budget in
+            let screenText = truncateUTF8(screenText, maxBytes: budget)
+            let prompt = "Context: \(context)\n\nText visible on the screen (OCR):\n\(screenText)\n\n\(Self.COMMENTARY_PROMPT)"
+            return try await self.generateWithTimeout(
+                "commentary", system: systemPrompt, prompt: prompt, shape: .sheepLine)
+        }
     }
 
     // MARK: - Chat (text-only, for conversation mode)
@@ -394,8 +454,14 @@ final class VisionPipeline {
                 text: turn.role == "sheep" ? Self.sheepTurnJSON(turn.text) : turn.text)
         }
 
-        let rawResponse = try await model.generateChat(
-            system: systemPrompt, prompt: userMessage, history: historyPayload)
+        let model = self.model
+        let rawResponse = try await Reflect.withTimeout(
+            seconds: Self.MODEL_TIMEOUT_SECS,
+            onTimeout: LanguageModelError("chat timed out after \(Int(Self.MODEL_TIMEOUT_SECS))s")
+        ) {
+            try await model.generateChat(
+                system: systemPrompt, prompt: userMessage, history: historyPayload, shape: .sheepLine)
+        }
 
         Log.info("vision", "chat raw: \(Log.rawForLog(rawResponse))")
         let parsed = Self.parseCommentaryResponse(rawResponse)
@@ -405,7 +471,7 @@ final class VisionPipeline {
 
         Memory.recordInteraction("chatted with")
         try? Memory.appendJournal(
-            "Human said: \"\(userMessage)\"\n**Reply**: \(parsed.event.text) [animation: \(Self.debugAnimation(parsed.event.animation))]")
+            "Human said: \"\(userMessage)\"\n**Reply**: \(parsed.event.text)\(Self.journalAnimation(parsed.event.animation))")
 
         // The chat bubble owns display now — no sheep-commentary emit
         return parsed.event

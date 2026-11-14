@@ -14,7 +14,7 @@ final class AppEvents {
     let openChat = Signal<Void>()
     /// ex-"capture-moment"
     let captureMoment = Signal<Void>()
-    /// ex-"debug-command": "force-feud" | "spectacle:<type>" | "app-switch"
+    /// ex-"debug-command": one of `Menus.debugItems`' commands.
     let debugCommand = Signal<String>()
     /// ex-"add-friend"
     let addFriend = Signal<FriendConfig>()

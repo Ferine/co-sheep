@@ -187,16 +187,8 @@ enum Config {
         loadConfig()?.language ?? "nynorsk"
     }
 
-    static func getBreakReminders() -> Bool {
-        loadConfig()?.breakReminders ?? true
-    }
-
     static func getWeatherLocation() -> String {
         loadConfig()?.weatherLocation ?? ""
-    }
-
-    static func getEasterMode() -> String {
-        loadConfig()?.easterMode ?? "auto"
     }
 
     static func getChristmasMode() -> ChristmasMode {

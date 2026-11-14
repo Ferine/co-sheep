@@ -183,14 +183,20 @@ struct VisionParsingTests {
         #expect(c.summary == "Desktop")
     }
 
-    @Test func classificationRequiresAllThreeFields() {
+    @Test func classificationRequiresTheVerdictAndTheSummary() {
         for raw in [
-            #"{"interesting": true, "summary": "no category"}"#,
             #"{"category": "x", "summary": "no interesting"}"#,
             #"{"interesting": true, "category": "x"}"#,
         ] {
             #expect(throws: VisionError.self) { try VisionPipeline.parseClassification(raw) }
         }
+    }
+
+    @Test func classificationDoesNotNeedTheCategoryNothingReads() throws {
+        let missing = try VisionPipeline.parseClassification(#"{"interesting": true, "summary": "no category"}"#)
+        #expect(missing == ScreenClassification(interesting: true, summary: "no category"))
+        let null = try VisionPipeline.parseClassification(#"{"interesting": false, "category": null, "summary": "idle"}"#)
+        #expect(null == ScreenClassification(interesting: false, category: "", summary: "idle"))
     }
 
     @Test func classificationRejectsWrongTypesAndTrailingText() {

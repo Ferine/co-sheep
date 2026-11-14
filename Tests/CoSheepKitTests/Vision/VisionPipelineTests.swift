@@ -34,9 +34,9 @@ extension BrainTests {
                 #expect(brain.todayCounts == ["router_visits": 1])
                 #expect(brain.totalComments == 1)
 
-                // The diary keeps the classification and the line, `{:?}`-style
+                // The diary keeps the classification, the line and the animation
                 #expect(todaysJournal().contains(
-                    "\(summary)\n**Comment**: Fancy router, mate. [animation: Some(\"spin\")]"))
+                    "\(summary)\n**Comment**: Fancy router, mate. [animation: spin]\n"))
             }
         }
 
@@ -62,7 +62,8 @@ extension BrainTests {
                 rig.model.commentary = #"{"text": "Hmm.", "animation": null}"#
                 try await rig.pipeline.runVisionPipeline()
                 #expect(rig.commentary.lines == [CommentaryEvent(text: "Hmm.", animation: nil)])
-                #expect(todaysJournal().contains("**Comment**: Hmm. [animation: None]"))
+                #expect(todaysJournal().contains("**Comment**: Hmm.\n"))
+                #expect(!todaysJournal().contains("[animation"))
             }
         }
 
@@ -142,6 +143,58 @@ extension BrainTests {
                 #expect(rig.model.generateCalls.count == 1) // pass 2 never ran
                 #expect(Memory.loadBrain().totalComments == 0)
                 #expect(todaysJournal().contains("Glanced at screen. An idle desktop. Nothing worth commenting on."))
+            }
+        }
+
+        @Test func aManualRunCommentsOnABoringScreenToo() async throws {
+            try await withBrainRoot { _ in
+                let rig = VisionRig()
+                rig.model.classification = #"{"interesting": false, "category": "idle", "summary": "An idle desktop"}"#
+
+                try await rig.pipeline.runVisionPipeline(manual: true)
+
+                #expect(rig.commentary.lines == [CommentaryEvent(text: "Baaa.", animation: .bounce)])
+                #expect(rig.model.generateCalls.count == 2) // the human asked: pass 2 ran anyway
+                #expect(Memory.loadBrain().totalComments == 1)
+                #expect(todaysJournal().contains("An idle desktop\n**Comment**: Baaa. [animation: bounce]"))
+                #expect(!todaysJournal().contains("Nothing worth commenting on"))
+            }
+        }
+
+        // MARK: guided generation and the context window
+
+        @Test func bothPassesAskForAShapedReply() async throws {
+            try await withBrainRoot { _ in
+                let rig = VisionRig()
+                try await rig.pipeline.runVisionPipeline()
+                #expect(rig.model.shapes == [.screenClassification, .sheepLine])
+            }
+        }
+
+        @Test func aPromptTooLargeForTheContextIsRetriedWithHalfTheScreenText() async throws {
+            try await withBrainRoot { _ in
+                let rig = VisionRig()
+                rig.model.ocrText = String(repeating: "x", count: 5000)
+                rig.model.failNextGenerate = LanguageModelError("generate: too many tokens", kind: .contextTooLarge)
+
+                try await rig.pipeline.runVisionPipeline()
+
+                // classify (too large), classify again, commentary
+                let prompts = rig.model.generateCalls.map(\.prompt)
+                #expect(prompts.count == 3)
+                #expect(prompts[0].contains(String(repeating: "x", count: VisionPipeline.OCR_BUDGET)))
+                #expect(prompts[1].contains(String(repeating: "x", count: VisionPipeline.OCR_BUDGET / 2)))
+                #expect(!prompts[1].contains(String(repeating: "x", count: VisionPipeline.OCR_BUDGET / 2 + 1)))
+                #expect(rig.commentary.texts == ["Baaa."])
+            }
+        }
+
+        @Test func otherModelFailuresAreNotRetried() async throws {
+            await withBrainRoot { _ in
+                let rig = VisionRig()
+                rig.model.failNextGenerate = LanguageModelError("generate: boom")
+                await #expect(throws: LanguageModelError.self) { try await rig.pipeline.runVisionPipeline() }
+                #expect(rig.model.generateCalls.count == 1)
             }
         }
 

@@ -91,16 +91,39 @@ extension BrainTests {
             }
         }
 
-        private func menuActions(status: @escaping () -> HookInstallStatus) -> MenuActions {
+        private func menuActions(
+            status: @escaping () -> HookInstallStatus = { .notInstalled },
+            isPaused: @escaping () -> Bool = { false }
+        ) -> MenuActions {
             MenuActions(
                 settings: {}, memory: {}, friends: {}, friendRelationships: {}, wardrobe: {}, chat: {},
-                captureMoment: {}, commentNow: {}, togglePause: {}, debugCapture: {}, debugCommand: { _ in },
-                claudeHooksStatus: status, toggleClaudeHooks: {}, quit: {})
+                captureMoment: {}, commentNow: {}, togglePause: {}, isPaused: isPaused, debugCapture: {},
+                debugCommand: { _ in }, claudeHooksStatus: status, toggleClaudeHooks: {}, quit: {})
+        }
+
+        @Test func pauseItemsCarryACheckmarkWhilePaused() {
+            var paused = false
+            let menus = Menus(actions: menuActions(isPaused: { paused }))
+            let statusItem = menus.pauseItem()
+            let appItem = menus.pauseItem()
+            #expect(statusItem.title == "Pause Commentary")
+            #expect(statusItem.state == .off)
+
+            // Opening either menu re-reads the flag.
+            paused = true
+            menus.menuNeedsUpdate(NSMenu())
+            #expect(statusItem.state == .on)
+            #expect(appItem.state == .on)
+
+            paused = false
+            menus.refreshPauseItems()
+            #expect(statusItem.state == .off)
+            #expect(appItem.state == .off)
         }
 
         @Test func menuItemsRefreshWhenTheMenuOpensAndWhenTheHooksChange() {
             var status = HookInstallStatus.notInstalled
-            let menus = Menus(actions: menuActions { status })
+            let menus = Menus(actions: menuActions(status: { status }))
             let statusItem = menus.claudeItem()
             let appItem = menus.claudeItem()
             menus.observeHookChanges()

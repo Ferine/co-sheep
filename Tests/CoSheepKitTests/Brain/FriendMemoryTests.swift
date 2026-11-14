@@ -302,6 +302,25 @@ extension BrainTests {
             }
         }
 
+        @Test func refreshMoodsMovesEveryLoadedBrain() {
+            withBrainRoot(now: localDate(2026, 7, 4, 12, 0)) { _ in
+                FriendMemory.ensureBrain("good_colleague", "Good Colleague")
+                for id in ["f1", "f2", "f3"] { FriendMemory.ensureBrain(id, id) }
+                for _ in 0..<5 { FriendMemory.recordConversation("f1", "f2", "tabs") }
+
+                FriendMemory.refreshMoods()
+                #expect(FriendMemory.getAllMoods()
+                    == ["good_colleague": "grumpy", "f1": "excited", "f2": "excited", "f3": "happy"])
+
+                // Night: the quiet ones get sleepy, the chatty ones are still buzzing.
+                SimClock.nowSource = { localDate(2026, 7, 4, 23, 30).timeIntervalSince1970 * 1000 }
+                FriendMemory.refreshMoods()
+                #expect(FriendMemory.getAllMoods()
+                    == ["good_colleague": "sleepy", "f1": "excited", "f2": "excited", "f3": "sleepy"])
+                #expect(FriendMemory.getFriendBrain("f3").mood == "sleepy")
+            }
+        }
+
         @Test func relationshipsAndMoodsCoverEveryCachedBrain() {
             withBrainRoot { _ in
                 FriendMemory.ensureBrain("good_colleague", "Good Colleague")

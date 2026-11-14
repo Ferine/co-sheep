@@ -6,9 +6,12 @@ import Testing
 struct BreakReminderTests {
     private final class Clock {
         var ms = 1_000_000.0
+        /// What the input-idle clock reads.
+        var idleSecs = 0.0
     }
 
-    /// Runs `body` with a controllable clock and a constant random source.
+    /// Runs `body` with a controllable clock, input-idle clock and a constant
+    /// random source.
     private func run(random: Double = 0, _ body: (Clock, BreakReminder, SpeechBubble) -> Void) {
         let savedNow = SimClock.nowSource
         let savedRandom = SimRandom.source
@@ -19,18 +22,26 @@ struct BreakReminderTests {
         let clock = Clock()
         SimClock.nowSource = { clock.ms }
         SimRandom.source = { random }
-        let reminder = BreakReminder()
+        let reminder = BreakReminder(idleSeconds: { clock.idleSecs })
         let bubble = SpeechBubble(listenToCommentary: false)
         body(clock, reminder, bubble)
         bubble.destroy()
     }
 
-    private let minutes46 = 46.0 * 60 * 1000
+    /// `minutes` at the desk: one 30-second check after another.
+    private func work(
+        _ minutes: Double, _ clock: Clock, _ reminder: BreakReminder, _ bubble: SpeechBubble,
+        personality: String = "snarky", onAnimation: ((SheepAnimation) -> Void)? = nil
+    ) {
+        for _ in 0..<Int(minutes * 2) {
+            clock.ms += 30_000
+            reminder.update(30_000, bubble, personality, onAnimation)
+        }
+    }
 
     @Test func staysQuietBeforeTheWorkThreshold() {
         run { clock, reminder, bubble in
-            clock.ms += 44 * 60 * 1000
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(45, clock, reminder, bubble)
             #expect(!bubble.visible)
         }
     }
@@ -38,14 +49,13 @@ struct BreakReminderTests {
     @Test func remindsAfter45MinutesOfWorkAndOnlyOnce() {
         run(random: 0) { clock, reminder, bubble in
             var animations: [SheepAnimation] = []
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "snarky") { animations.append($0) }
+            work(45.5, clock, reminder, bubble) { animations.append($0) }
             #expect(bubble.visible)
             #expect(bubble.currentText == BreakReminder.MESSAGES["snarky"]![0])
             #expect(animations == [.headshake])
 
             bubble.hide()
-            reminder.update(30_000, .idle, bubble, "snarky") { animations.append($0) }
+            work(60, clock, reminder, bubble) { animations.append($0) }
             #expect(!bubble.visible)
             #expect(animations == [.headshake])
         }
@@ -53,24 +63,63 @@ struct BreakReminderTests {
 
     @Test func checksOnlyEvery30Seconds() {
         run { clock, reminder, bubble in
-            clock.ms += minutes46
-            reminder.update(29_999, .idle, bubble, "snarky")
+            work(45, clock, reminder, bubble)
+            clock.ms += 30_000
+            reminder.update(29_999, bubble, "snarky")
             #expect(!bubble.visible)
-            reminder.update(1, .idle, bubble, "snarky")
+            reminder.update(1, bubble, "snarky")
             #expect(bubble.visible)
         }
     }
 
-    @Test func boredStatesResetTheTimer() {
+    @Test func fiveIdleMinutesAreABreak() {
         run { clock, reminder, bubble in
-            clock.ms += minutes46
-            reminder.update(30_000, .idleCampfire, bubble, "snarky") // user is away
+            work(44, clock, reminder, bubble)
+            clock.idleSecs = BreakReminder.BREAK_IDLE_SECS // hands off the keyboard
+            work(0.5, clock, reminder, bubble)
+            clock.idleSecs = 0
+            // The clock started over: 45 more minutes pass quietly...
+            work(45, clock, reminder, bubble)
             #expect(!bubble.visible)
-            clock.ms += 44 * 60 * 1000
-            reminder.update(30_000, .idle, bubble, "snarky")
+            // ...and then the next stretch earns its own reminder.
+            work(0.5, clock, reminder, bubble)
+            #expect(bubble.visible)
+        }
+    }
+
+    @Test func aShortPauseIsNotABreak() {
+        run { clock, reminder, bubble in
+            work(44, clock, reminder, bubble)
+            clock.idleSecs = BreakReminder.BREAK_IDLE_SECS - 1 // reading, not resting
+            work(1.5, clock, reminder, bubble)
+            #expect(bubble.visible)
+        }
+    }
+
+    @Test func aBreakEarnsAnotherReminderLater() {
+        run { clock, reminder, bubble in
+            work(45.5, clock, reminder, bubble)
+            #expect(bubble.visible)
+            bubble.hide()
+            clock.idleSecs = 600
+            work(0.5, clock, reminder, bubble)
+            clock.idleSecs = 0
+            work(45.5, clock, reminder, bubble)
+            #expect(bubble.visible)
+        }
+    }
+
+    @Test func timeAsleepIsABreakNotWork() {
+        run { clock, reminder, bubble in
+            work(44, clock, reminder, bubble)
+            // The lid was shut for an hour: no checks ran, and the wake-up
+            // keystroke means the idle clock reads zero.
+            clock.ms += 60 * 60 * 1000
+            reminder.update(30_000, bubble, "snarky")
             #expect(!bubble.visible)
-            clock.ms += 2 * 60 * 1000
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(45, clock, reminder, bubble)
+            #expect(!bubble.visible)
+            work(0.5, clock, reminder, bubble)
             #expect(bubble.visible)
         }
     }
@@ -78,8 +127,7 @@ struct BreakReminderTests {
     @Test func disabledRemindersNeverFire() {
         run { clock, reminder, bubble in
             reminder.setEnabled(false)
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(46, clock, reminder, bubble)
             #expect(!bubble.visible)
         }
     }
@@ -87,22 +135,21 @@ struct BreakReminderTests {
     @Test func reEnablingRestartsTheWorkClock() {
         run { clock, reminder, bubble in
             reminder.setEnabled(false)
-            clock.ms += minutes46
+            work(46, clock, reminder, bubble)
             reminder.setEnabled(true)
             // The disabled stretch isn't one long work session.
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(45, clock, reminder, bubble)
             #expect(!bubble.visible)
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(0.5, clock, reminder, bubble)
             #expect(bubble.visible)
         }
     }
 
     @Test func reassertingEnabledKeepsTheWorkClock() {
         run { clock, reminder, bubble in
-            clock.ms += minutes46
+            work(45, clock, reminder, bubble)
             reminder.setEnabled(true) // a settings reload while already on
-            reminder.update(30_000, .idle, bubble, "snarky")
+            work(0.5, clock, reminder, bubble)
             #expect(bubble.visible)
         }
     }
@@ -110,8 +157,7 @@ struct BreakReminderTests {
     @Test func namesTheCulpritApp() {
         run { clock, reminder, bubble in
             reminder.currentApp = "Xcode"
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "wholesome")
+            work(45.5, clock, reminder, bubble, personality: "wholesome")
             #expect(bubble.currentText == BreakReminder.MESSAGES["wholesome"]![0] + " (Xcode, specifically.)")
         }
     }
@@ -119,18 +165,20 @@ struct BreakReminderTests {
     @Test func emptyAppNameIsIgnoredLikeAFalsyJSString() {
         run { clock, reminder, bubble in
             reminder.currentApp = ""
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "chaotic")
+            work(45.5, clock, reminder, bubble, personality: "chaotic")
             #expect(bubble.currentText == BreakReminder.MESSAGES["chaotic"]![0])
         }
     }
 
     @Test func unknownPersonalitiesFallBackToSnarky() {
         run(random: 0.99) { clock, reminder, bubble in
-            clock.ms += minutes46
-            reminder.update(30_000, .idle, bubble, "good_colleague")
+            work(45.5, clock, reminder, bubble, personality: "good_colleague")
             #expect(bubble.currentText == BreakReminder.MESSAGES["snarky"]![4])
         }
+    }
+
+    @Test func theSystemIdleClockIsReadable() {
+        #expect(BreakReminder.systemIdleSeconds() >= 0)
     }
 
     @Test func everyPersonalityHasFiveMessages() {

@@ -217,6 +217,11 @@ enum EasterMemory {
         for id in stats.hunters.keys {
             stats.hunters[id]?.eggsFoundToday = 0
         }
+        // A day without a hunt ends the streak now, not at the next hunt:
+        // the HUD would otherwise show last year's streak all through Easter.
+        if stats.lastHuntDate != todayStr && stats.lastHuntDate != yesterday() {
+            stats.currentStreak = 0
+        }
         return true
     }
 

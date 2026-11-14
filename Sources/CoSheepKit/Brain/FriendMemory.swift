@@ -361,6 +361,15 @@ enum FriendMemory {
         }
     }
 
+    /// Let every loaded friend's mood follow its day: chatty friends cheer
+    /// up, everyone gets sleepy at night, and Good Colleague sinks back into
+    /// his grump. Called once a drama minute, right before the moods are read
+    /// (the Rust `update_mood` existed but nothing ever called it, so moods
+    /// never moved off their starting value).
+    static func refreshMoods() {
+        for id in Array(cache.keys) { updateMood(id) }
+    }
+
     static func updateMood(_ id: String) {
         var brain = loadBrain(id)
         let convos = brain.stats.conversationsToday

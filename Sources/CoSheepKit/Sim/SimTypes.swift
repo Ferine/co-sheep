@@ -28,8 +28,6 @@ nonisolated enum SheepAnimation: String, CaseIterable, Codable {
     case bounce, spin, backflip, headshake, zoom, vibrate
 }
 
-nonisolated let ANIMATIONS: [SheepAnimation] = SheepAnimation.allCases
-
 nonisolated struct CommentaryEvent: Equatable, Codable {
     var text: String
     var animation: SheepAnimation?

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // Ex-break-reminder.ts. Messages are verbatim.
@@ -34,19 +35,43 @@ final class BreakReminder {
         ],
     ]
 
-    private var lastBoredTime = SimClock.nowMs()
+    /// Seconds since the human last touched the keyboard or mouse.
+    private let idleSeconds: () -> Double
+    /// When the current stretch of work began.
+    private var workStart = SimClock.nowMs()
+    private var lastCheck = SimClock.nowMs()
     private var reminderShown = false
     private var enabled = true
     private let WORK_THRESHOLD: Double = 45 * 60 * 1000
     private let CHECK_INTERVAL: Double = 30_000
     private var checkAccum: Double = 0
 
+    /// No input for this long is a break: the work clock starts over.
+    static let BREAK_IDLE_SECS: Double = 5 * 60
+
     /// Set from app-switched events; names the culprit app in reminders.
     var currentApp: String?
 
+    /// - Parameter idleSeconds: the input-idle clock (tests pass a fake).
+    init(idleSeconds: @escaping () -> Double = BreakReminder.systemIdleSeconds) {
+        self.idleSeconds = idleSeconds
+    }
+
+    /// Seconds since the last keyboard or mouse event in this login session.
+    /// Needs no permission (it reads a counter, not the events).
+    nonisolated static func systemIdleSeconds() -> Double {
+        // `kCGAnyInputEventType`
+        guard let anyInput = CGEventType(rawValue: ~0) else { return 0 }
+        return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+    }
+
+    /// "Continuous work" is the human at the keyboard or mouse without a
+    /// five-minute pause. (It used to be read off the main sheep: the clock
+    /// reset whenever the sheep was dozing, which follows how long the sheep
+    /// was left alone, not whether anyone was working, so with the default
+    /// commentary interval it reset nearly every check.)
     func update(
         _ dt: Double,
-        _ sheepState: SheepState,
         _ bubble: SpeechBubble,
         _ personality: String,
         _ onAnimation: ((SheepAnimation) -> Void)? = nil
@@ -57,15 +82,19 @@ final class BreakReminder {
         if checkAccum < CHECK_INTERVAL { return }
         checkAccum = 0
 
-        // Reset timer if sheep is in a "bored" state (meaning user is idle)
-        let boredStates: [SheepState] = [.idleSleep, .idleCampfire, .idleCounting]
-        if boredStates.contains(sheepState) {
-            lastBoredTime = SimClock.nowMs()
+        // The human stepped away, or nothing ran for a while (the Mac slept,
+        // the screen was locked): that was the break.
+        let now = SimClock.nowMs()
+        let sinceLastCheck = now - lastCheck
+        lastCheck = now
+        let breakMs = Self.BREAK_IDLE_SECS * 1000
+        if sinceLastCheck >= breakMs || idleSeconds() >= Self.BREAK_IDLE_SECS {
+            workStart = now
             reminderShown = false
             return
         }
 
-        if !reminderShown && SimClock.nowMs() - lastBoredTime > WORK_THRESHOLD {
+        if !reminderShown && now - workStart > WORK_THRESHOLD {
             let pool = Self.MESSAGES[personality] ?? Self.MESSAGES["snarky"]!
             var msg = pool[SimRandom.int(pool.count)]
             // JS truthiness: an empty app name is falsy.
@@ -84,7 +113,8 @@ final class BreakReminder {
     /// value — every settings reload does — changes nothing.
     func setEnabled(_ on: Bool) {
         if on && !enabled {
-            lastBoredTime = SimClock.nowMs()
+            workStart = SimClock.nowMs()
+            lastCheck = workStart
             reminderShown = false
             checkAccum = 0
         }

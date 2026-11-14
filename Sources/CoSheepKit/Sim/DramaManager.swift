@@ -246,6 +246,7 @@ final class DramaManager {
         resetPettingIfNewDay()
 
         // ex-`invoke("get_all_relationships")` / `invoke("get_friend_moods")`.
+        FriendMemory.refreshMoods()
         let rels = FriendMemory.getAllRelationships()
         let moods = FriendMemory.getAllMoods()
 

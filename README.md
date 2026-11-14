@@ -11,7 +11,7 @@ A desktop companion sheep that watches your screen and delivers snarky commentar
 ## What it does
 
 - A pixel sheep parachutes onto your desktop and wanders around
-- Every few minutes, it captures your screen and runs it through a two-pass, fully on-device AI pipeline (Apple Intelligence + Vision OCR — nothing ever leaves your Mac)
+- Every few minutes, it captures your screen and runs it through a two-pass, fully on-device AI pipeline (Apple Intelligence + Vision OCR — what's on your screen never leaves your Mac)
 - **Pass 1**: cheap classification — is anything interesting happening?
 - **Pass 2**: commentary with expressive animations — only when warranted
 - The sheep forms persistent opinions about you that grow stronger over time
@@ -25,7 +25,7 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 
 - **Personality** — Snarky, Wholesome, Chaotic, or Passive-Aggressive — affects quips, idle behavior, and reactions
 - **Color** — pink, green, gold, purple, or orange tint
-- **Accessories** — party hat, crown, top hat, wizard hat, sunglasses, cape, scarf, and 12 more from the wardrobe
+- **Accessories** — party hat, crown, top hat, wizard hat, sunglasses, cape, scarf, and 11 more from the wardrobe
 - **Size variation** — each friend spawns slightly smaller or larger (0.85x–1.15x)
 - **Name tags** — visible during calm states
 
@@ -33,7 +33,7 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 
 - **Personality idle activities** — chaotic friends zoom around randomly, wholesome friends emit hearts, snarky friends judge-stare with a magnifying glass, passive-aggressive friends sigh dramatically
 - **Reactive emotes** — when the main sheep gets AI commentary, nearby friends react ("WHAT", "Hmm.", "*pretends not to notice*")
-- **45+ conversation scripts** — personality-pair dialogues, time-aware morning/night exchanges, weather-aware banter, running gags
+- **75+ conversation scripts** — personality-pair dialogues, time-aware morning/night exchanges, weather-aware and seasonal banter, running gags
 - **AI-generated conversations** — 30% chance that friend pairs have unique on-device-generated dialogue instead of scripted lines
 - **Group activities** — campfire circles, follow-the-leader, synchronized bouncing, huddle formations, group sunbathing in summer, and at Christmas a walk around the tree and a gift exchange
 - **Notifications** — friends greet on launch, comment on nightfall, echo break reminders
@@ -42,12 +42,12 @@ Your sheep is never alone. **Good Colleague** (a Norwegian office sheep with gla
 
 Each friend has a persistent brain (`~/.co-sheep/friends/{id}.json`) that tracks:
 
-- **Mood** — happy, grumpy, sleepy, or excited (drifts based on recent activity)
+- **Mood** — happy, grumpy, sleepy, or excited: chatty friends cheer up, everyone gets sleepy at night, and Good Colleague drifts back to grumpy
 - **Relationships** — affinity scores with every other character (+1 per conversation, +2 per group activity, daily decay)
 - **Memories** — last 20 notable events ("Talked with Fluffy about tabs", "Got petted by human!")
 - **Stats** — conversations today/total, times petted, group activities, days alive
 
-The "Friend Relationships" viewer shows an affinity matrix, per-friend stats, and memory timeline.
+The "Friend Relationships" viewer shows each friend's mood, affinities, stats, and memory timeline.
 
 ## Interactions
 
@@ -55,7 +55,9 @@ The "Friend Relationships" viewer shows an affinity matrix, per-friend stats, an
 - **Double-click** — random quip and animation, no API call needed
 - **Petting** — hover over any sheep for 2+ seconds, it falls asleep with floating hearts
 - **File drop** — drag a file onto any sheep and it "eats" it with a comment based on file type
-- **Right-click** main sheep to chat directly
+- **Right-click** main sheep to chat directly (the ✕ in the corner, Esc, or a click elsewhere closes the chat)
+- **Shake the mouse** hard and the whole flock stampedes
+- **Stack them** — drop one sheep on another; drop one from high up and it trampolines
 - **Capture Moment** — save sheep + speech bubble as PNG to Desktop (tray menu)
 
 ## Agent Herd: every Claude Code session is a lamb
@@ -89,8 +91,11 @@ or slow Claude Code. **Disconnect Claude Code** removes exactly what it added.
 Token counts come from reading the session transcript locally. Nothing leaves
 your machine.
 
-Settings → Agent Herd toggles the lambs and the shepherd. Debug → "Herd: Demo
-Flock" shows five fake lambs (`CO_SHEEP_HERD_DEMO=1` does it at launch).
+Settings → Agent Herd toggles the lambs and the shepherd (no lambs, no
+shepherd). `herd_max_lambs` in `~/.co-sheep/config.json` caps how many are on
+screen (default 8, at most 16); sessions beyond that wait their turn off-screen.
+Debug → "Herd: Demo Flock" shows five fake lambs (`CO_SHEEP_HERD_DEMO=1` does
+it at launch).
 
 ## MCP: Claude Code narrates through the sheep
 
@@ -116,12 +121,16 @@ Or add to `.mcp.json`:
 
 Tools: `session_begin`, `set_task`, `progress`, `milestone` (`done`/`failed`/
 `blocked`/`waiting_on_you`), `say`, `session_end`. You report facts; the sheep
-supplies the snark, animations, and mood. Tools only affect what the sheep
+supplies the snark and the animations. Tools only affect what the sheep
 displays — no filesystem or shell access.
 
 Config lives in `~/.co-sheep/config.json`: `mcp_enabled` (default `true`),
 `mcp_port` (default `4917`), `mcp_token` (optional bearer token; add
 `--header "Authorization: Bearer <token>"` to the connect command if set).
+These are read at launch, so restart co-sheep after changing them. The Agent
+Herd's hooks report through the same listener: `mcp_enabled: false` turns the
+lambs off too, and after changing the port or token the tray item reads
+**Repair Claude Code Hooks…** until you let it rewrite the hook script.
 
 ### Getting Claude to actually narrate
 
@@ -144,8 +153,13 @@ That turns the sheep from "available" into "actually keeps you company."
 ![Night mode](docs/night-mode.png)
 
 - **Night mode** (8pm–6am) — twinkling stars, moonlight glow, fireflies near idle sheep, enhanced campfire glow
-- **Weather** — set a city in settings and see rain or snow particles on screen; the AI references weather in commentary
-- **Break reminders** — after 45 min of continuous work, the sheep nudges you to take a break (personality-flavored)
+- **Weather** — set a city in settings and see rain or snow particles on screen; the AI references weather in commentary. The city is looked up at [wttr.in](https://wttr.in), the one network request co-sheep makes
+- **Break reminders** — after 45 min at the keyboard or mouse without a five-minute pause, the sheep nudges you to take a break (personality-flavored). Five minutes away (hands off, screen locked or lid closed) counts as the break
+
+## Easter and summer
+
+- **Easter** — from the Tuesday before Easter Sunday to the Tuesday after (or whenever you force it in Settings): eggs appear on the desktop, bored sheep paint them, and the flock holds egg hunts with a scoreboard. Hunts, streaks and the top hunter persist in `~/.co-sheep/easter.json`
+- **Summer** — June to August (with a weather location: only on a clear day of 18 °C or more): a sun, sunflowers and butterflies, and group sunbathing
 
 ## Christmas
 
@@ -203,11 +217,13 @@ Accessible from the macOS menu bar or tray icon:
 - **Sheep name** — rename your sheep anytime
 - **Commentary interval** — 30 seconds to 10 minutes
 - **Personality** — Snarky, Wholesome, Chaotic, or Passive-Aggressive
-- **Language** — defaults to Nynorsk, with 10 language options
+- **Language** — defaults to Nynorsk, with 10 language options. Settings says so when Apple Intelligence doesn't list the chosen language as supported on your Mac (Nynorsk isn't listed; Bokmål is), in which case expect the odd slip into another language
 - **Weather location** — city name for weather awareness and effects
-- **Summer Mode** — auto (June–August when the weather is clear and warm), always on, or off
+- **Easter Mode** — auto (Easter week), always on, or off
+- **Summer Mode** — auto (June–August; with a weather location, only when it's clear and warm), always on, or off
 - **Christmas Mode** — auto (December 1 – January 6), always on, or off
 - **Break reminders** — toggle 45-min work break nudges
+- **Agent Herd** — show the agent lambs; let the main sheep comment on them
 
 Settings are stored at `~/.co-sheep/config.json`.
 
@@ -222,7 +238,10 @@ Available from the tray icon and macOS menu bar:
 - **Wardrobe** — dress up your main sheep with 18 accessories
 - **Chat with Sheep** — direct conversation with the main sheep
 - **Capture Moment** — save sheep screenshot to Desktop
-- **Comment Now** — trigger immediate AI commentary
+- **Comment Now** — trigger immediate AI commentary, even on a boring screen
+- **Pause Commentary** — the sheep stops looking at your screen on its own (checked while paused; the flock carries on, and it's back on after a restart)
+- **Connect Claude Code…** — install or remove the Agent Herd hooks
+- **Debug Capture…** (app menu) — save exactly what the sheep sees to the Desktop
 
 ## Requirements
 
@@ -235,7 +254,7 @@ Available from the tray icon and macOS menu bar:
 scripts/run.sh            # build (debug), bundle build/co-sheep.app, run with logs in the terminal
 scripts/bundle.sh release # just assemble + sign build/co-sheep.app
 scripts/build-dmg.sh      # release bundle → build/co-sheep_<version>_<arch>.dmg
-swift test                # ~1000 tests (Swift Testing)
+swift test                # ~1700 tests (Swift Testing)
 ```
 
 Dev knobs (environment variables):
@@ -246,6 +265,8 @@ Dev knobs (environment variables):
 | `CO_SHEEP_HOME=/path` | use a scratch copy instead of `~/.co-sheep` |
 | `CO_SHEEP_FPS=30` | overlay frame rate (default 60) |
 | `CO_SHEEP_SNAPSHOT=/path.png` (+ `CO_SHEEP_SNAPSHOT_DELAY_MS`) | write a PNG of the overlay scene, no Screen Recording needed |
+| `CO_SHEEP_HERD_DEMO=1` | spawn five demo lambs at launch |
+| `CO_SHEEP_CLAUDE_DIR=/path` | install the Agent Herd hooks into a scratch directory instead of `~/.claude` |
 
 ## Screen Recording Permission
 
@@ -264,13 +285,13 @@ automatically (or set `CODESIGN_IDENTITY`).
 [configurable timer, default ~2.5 min, ±20%]
     |
     v
-[ScreenCaptureKit: capture primary display, longest side ≤ 1568px]
+[ScreenCaptureKit: capture primary display (minus co-sheep's own windows), longest side ≤ 1568px]
     |
     v
 [Vision OCR extracts on-screen text (on-device)]
     |
     v
-[Pass 1: FoundationModels classifies the screen text]
+[Pass 1: FoundationModels classifies the screen text (guided generation)]
     |
     +-- not interesting -> skip, log to diary
     |
@@ -298,12 +319,14 @@ co-sheep/
 ├── Sources/CoSheep/main.swift    # NSApplication bootstrap
 ├── Sources/CoSheepKit/
 │   ├── App/        # AppDelegate, AppController (backend commands), menus, windows
+│   ├── Foundation/ # paths, JSON files, clocks, logging, signals
 │   ├── Overlay/    # transparent click-through panel, SpriteKit scene, input, chat bubble
 │   ├── Render/     # Canvas API, display lists, CoreGraphics replay, tiles, sprites
 │   ├── Sim/        # Sheep, Flock, bubbles, accessories, conversations, drama,
 │   │               # spectacles, group activities, seasons, night, weather, managers
-│   ├── Brain/      # config, opinions, journal, friend memory, reflection
-│   ├── Services/   # FoundationModels + OCR, capture, weather, app watch, vision pipeline
+│   ├── Brain/      # config, opinions, journal, friend memory, reflection, shepherd
+│   ├── Services/   # FoundationModels + OCR, capture, weather, app watch, power, vision pipeline
+│   ├── Herd/       # Claude Code sessions: hook installer, reducer, transcript tailer
 │   ├── MCP/        # zero-dependency Streamable HTTP MCP server
 │   ├── UI/         # SwiftUI windows: settings, brain, friends, wardrobe, naming, relationships
 │   └── Resources/  # sprite sheets, icons
@@ -316,7 +339,8 @@ co-sheep/
 Zero API cost — everything runs on Apple's on-device foundation model. Your
 screen content never leaves your Mac: the sheep "sees" your screen through
 on-device Vision OCR (extracted text) rather than the actual pixels. The MCP
-server only listens on `127.0.0.1`.
+server only listens on `127.0.0.1`. The one thing that goes over the network
+is the optional weather lookup: the city you set is sent to wttr.in.
 
 ## License
 

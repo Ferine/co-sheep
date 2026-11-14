@@ -34,6 +34,14 @@ extension BrainTests {
             }
         }
 
+        @Test func chatAsksForAShapedReply() async throws {
+            try await withBrainRoot { _ in
+                let rig = VisionRig()
+                _ = try await rig.pipeline.chatWithSheep("hei", history: [])
+                #expect(rig.model.shapes == [.sheepLine])
+            }
+        }
+
         @Test func chatWithoutHistorySendsAnEmptyTranscript() async throws {
             try await withBrainRoot { _ in
                 let rig = VisionRig()
@@ -74,7 +82,7 @@ extension BrainTests {
 
                 let journal = todaysJournal()
                 #expect(journal.contains("*My human chatted with me!*"))
-                #expect(journal.contains("Human said: \"what now?\"\n**Reply**: Baaa. [animation: Some(\"bounce\")]"))
+                #expect(journal.contains("Human said: \"what now?\"\n**Reply**: Baaa. [animation: bounce]"))
                 let brain = Memory.loadBrain()
                 #expect(brain.totalInteractions == 1)
                 #expect(brain.totalComments == 0)

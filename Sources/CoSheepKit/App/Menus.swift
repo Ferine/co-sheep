@@ -13,8 +13,10 @@ struct MenuActions {
     var captureMoment: () -> Void
     var commentNow: () -> Void
     var togglePause: () -> Void
+    /// Whether the screen commentary is paused, for the menu item's checkmark.
+    var isPaused: () -> Bool
     var debugCapture: () -> Void
-    /// "force-feud" | "spectacle:<type>" | "app-switch" | "herd:demo" | "herd:clear-demo"
+    /// One of `Menus.debugItems`' commands.
     var debugCommand: (String) -> Void
     /// Agent herd: whether Claude Code is connected, for the menu item's title.
     var claudeHooksStatus: () -> HookInstallStatus
@@ -31,6 +33,8 @@ final class Menus: NSObject, NSMenuDelegate {
     /// The "Connect Claude Code…" items (one per menu); titles follow the hook status.
     private var claudeItems: [NSMenuItem] = []
     private var stopObservingHooks: (() -> Void)?
+    /// The "Pause Commentary" items (one per menu); checked while paused.
+    private var pauseItems: [NSMenuItem] = []
 
     // Debug submenu — every item maps to a debug-command.
     static let debugItems: [(title: String, command: String)] = [
@@ -61,6 +65,7 @@ final class Menus: NSObject, NSMenuDelegate {
         installMainMenu()
         observeHookChanges()
         refreshClaudeItems()
+        refreshPauseItems()
         Log.info("tray", "System tray created")
     }
 
@@ -77,6 +82,23 @@ final class Menus: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         refreshClaudeItems()
+        refreshPauseItems()
+    }
+
+    // MARK: Pause
+
+    /// A "Pause Commentary" item that shows a checkmark while the sheep has
+    /// stopped looking at the screen (the title alone never said which state
+    /// it was in).
+    func pauseItem() -> NSMenuItem {
+        let i = item("Pause Commentary", #selector(togglePause))
+        pauseItems.append(i)
+        return i
+    }
+
+    func refreshPauseItems() {
+        let state: NSControl.StateValue = actions.isPaused() ? .on : .off
+        for item in pauseItems { item.state = state }
     }
 
     func refreshClaudeItems() {
@@ -127,7 +149,7 @@ final class Menus: NSObject, NSMenuDelegate {
         m.addItem(item("Chat with Sheep...", #selector(chat)))
         m.addItem(item("Capture Moment", #selector(captureMoment)))
         m.addItem(item("Comment Now", #selector(commentNow)))
-        m.addItem(item("Pause Commentary", #selector(togglePause)))
+        m.addItem(pauseItem())
         m.addItem(.separator())
         m.addItem(claudeItem())
         m.addItem(debugSubmenu())
@@ -151,7 +173,7 @@ final class Menus: NSObject, NSMenuDelegate {
         app.addItem(item("Chat with Sheep...", #selector(chat)))
         app.addItem(item("Capture Moment", #selector(captureMoment)))
         app.addItem(item("Comment Now", #selector(commentNow)))
-        app.addItem(item("Pause Commentary", #selector(togglePause)))
+        app.addItem(pauseItem())
         app.addItem(item("Debug Capture...", #selector(debugCapture)))
         app.addItem(.separator())
         app.addItem(claudeItem())
@@ -195,7 +217,7 @@ final class Menus: NSObject, NSMenuDelegate {
     @objc private func chat() { log("chat"); actions.chat() }
     @objc private func captureMoment() { log("capture_moment"); actions.captureMoment() }
     @objc private func commentNow() { log("comment_now"); actions.commentNow() }
-    @objc private func togglePause() { log("pause"); actions.togglePause() }
+    @objc private func togglePause() { log("pause"); actions.togglePause(); refreshPauseItems() }
     @objc private func debugCapture() { log("debug_capture"); actions.debugCapture() }
     @objc private func claudeHooks() { log("claude_hooks"); actions.toggleClaudeHooks() }
     @objc private func quit() { log("quit"); actions.quit() }

@@ -165,7 +165,19 @@ extension BrainTests {
             }
         }
 
-        @Test func aFailedCommentNowIsLoggedNotShown() async throws {
+        @Test func commentNowCommentsEvenOnABoringScreen() async throws {
+            await withBrainRoot { root in
+                let rig = ControllerRig(root: root)
+                rig.model.classification = #"{"interesting": false, "category": "idle", "summary": "An idle desktop"}"#
+
+                rig.controller.commentNow()
+                await rig.controller.commentNowTask?.value
+
+                #expect(rig.commentary.lines == [CommentaryEvent(text: "Baaa.", animation: .bounce)])
+            }
+        }
+
+        @Test func aCommentNowThatCannotSeeTheScreenSaysSo() async throws {
             await withBrainRoot { root in
                 let rig = ControllerRig(root: root)
                 rig.screen.captureHook = { _ in throw PlatformError("Failed to capture screen") }
@@ -173,8 +185,37 @@ extension BrainTests {
                 rig.controller.commentNow()
                 await rig.controller.commentNowTask?.value
 
-                #expect(rig.commentary.lines.isEmpty)
+                #expect(rig.commentary.texts == [VisionPipeline.SCREEN_ERROR_LINE])
                 #expect(!rig.pipeline.isTickRunning)
+            }
+        }
+
+        @Test func aCommentNowWhoseModelFailsGetsTheBrainLine() async throws {
+            await withBrainRoot { root in
+                let rig = ControllerRig(root: root)
+                rig.model.generateFailure = LanguageModelError("generate: boom")
+
+                rig.controller.commentNow()
+                await rig.controller.commentNowTask?.value
+
+                #expect(rig.commentary.texts == [AppController.chatFailureLine(language: "nynorsk")])
+                #expect(!rig.pipeline.isTickRunning)
+            }
+        }
+
+        @Test func aSecondCommentNowWaitsForTheFirstToFinish() async throws {
+            await withBrainRoot { root in
+                let rig = ControllerRig(root: root)
+
+                rig.controller.commentNow()
+                rig.controller.commentNow() // still in flight: ignored
+                await rig.controller.commentNowTask?.value
+                #expect(rig.screen.captureCount == 1)
+                #expect(rig.commentary.lines.count == 1)
+
+                rig.controller.commentNow() // done: the next click runs again
+                await rig.controller.commentNowTask?.value
+                #expect(rig.screen.captureCount == 2)
             }
         }
 
@@ -462,7 +503,7 @@ extension BrainTests {
             }
         }
 
-        @Test func anMCPStartFailureIsLoggedAndTheAppKeepsGoing() async throws {
+        @Test func anMCPStartFailureIsSaidOutLoudAndTheAppKeepsGoing() async throws {
             try await withBrainRoot { root in
                 try Config.updateConfig { $0.mcpEnabled = true; $0.mcpPort = 0 }
                 let rig = ControllerRig(root: root)
@@ -476,6 +517,8 @@ extension BrainTests {
                 #expect(rig.mcp.port == firstPort)
                 #expect(rig.controller.isRunning)
                 #expect(rig.pipeline.isRunning)
+                // No listener means no narration and no lambs: the human hears why.
+                #expect(rig.commentary.texts == [AppController.serverFailureLine(port: 0)])
             }
         }
     }
