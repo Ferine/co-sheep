@@ -27,16 +27,34 @@ final class ScriptedModel: LanguageModel {
     var commentary = #"{"text": "Baaa.", "animation": "bounce"}"#
     var chatReply = #"{"text": "Baaa.", "animation": null}"#
     var generateFailure: (any Error)?
+    /// Thrown by the next `generate` call only.
+    var failNextGenerate: (any Error)?
     var chatFailure: (any Error)?
 
     private(set) var generateCalls: [(system: String, prompt: String)] = []
     private(set) var chatCalls: [(system: String, prompt: String, history: [HistoryTurn])] = []
     private(set) var ocrCalls = 0
+    /// The shape each shaped call asked for, in order.
+    private(set) var shapes: [ReplyShape] = []
 
     func unavailableReason() -> String? { reason }
 
+    func generate(system: String, prompt: String, shape: ReplyShape) async throws -> String {
+        shapes.append(shape)
+        return try await generate(system: system, prompt: prompt)
+    }
+
+    func generateChat(system: String, prompt: String, history: [HistoryTurn], shape: ReplyShape) async throws -> String {
+        shapes.append(shape)
+        return try await generateChat(system: system, prompt: prompt, history: history)
+    }
+
     func generate(system: String, prompt: String) async throws -> String {
         generateCalls.append((system, prompt))
+        if let failure = failNextGenerate {
+            failNextGenerate = nil
+            throw failure
+        }
         if let generateFailure { throw generateFailure }
         return system == VisionPipeline.CLASSIFY_SYSTEM ? classification : commentary
     }

@@ -2885,6 +2885,36 @@ struct FlockChristmasTests {
         }
     }
 
+    @Test func aPartyDoorWithNobodyFreeStillGetsASurprise() {
+        withWorld { world in
+            let flock = christmasFlock(world) // quietStage: nobody may come to the tree
+            for _ in 1...5 { flock.previewNextDoor() }
+            flock.setChristmasMode(.off) // puts out the light show door 2 started
+            flock.setChristmasMode(.auto)
+            #expect(!flock.christmasTheme.lightShowRunning)
+
+            flock.previewNextDoor() // 6: "Everyone to the tree" — and nobody can
+            #expect(flock.mainBubble.currentText.hasPrefix("Luke 6: "))
+            #expect(flock.groupActivity == nil)
+            #expect(flock.christmasTheme.lightShowRunning)
+        }
+    }
+
+    @Test func switchingSummerOffEndsTheSunbathing() {
+        withWorld { world in
+            let flock = makeFlock(friends: [friend("a")])
+            quietStage(flock)
+            flock.setSummerMode(.on)
+            flock.groupActivity = createGroupActivity(.sunbathe, ["main", "good_colleague", "a"], 400)
+
+            flock.setSummerMode(.on) // every settings save re-applies the mode
+            #expect(flock.groupActivity?.type == .sunbathe)
+
+            flock.setSummerMode(.off)
+            #expect(flock.groupActivity == nil)
+        }
+    }
+
     @Test func itWakesTheDozersAndLeavesTheBusyOnesAlone() {
         withWorld { world in
             let flock = christmasFlock(world, friends: [friend("a"), friend("b")])

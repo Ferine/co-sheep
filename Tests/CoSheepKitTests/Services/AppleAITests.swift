@@ -86,6 +86,45 @@ struct AppleAITests {
 
     // MARK: availability
 
+    // MARK: guided generation, errors, languages
+
+    @Test func everyReplyShapeHasASchema() throws {
+        for shape in [ReplyShape.screenClassification, .sheepLine] {
+            _ = try AppleAI.schema(for: shape)
+        }
+        // The schema can only offer the animations the sheep can play.
+        #expect(AppleAI.animationNames == ["bounce", "spin", "backflip", "headshake", "zoom", "vibrate"])
+        #expect(AppleAI.opinionCategories == ["habit", "fact", "opinion", "pattern"])
+    }
+
+    @Test func generationErrorsKeepWhatTheCallerCanActOn() {
+        typealias Failure = FoundationModels.LanguageModelError
+        let cases: [(Failure, CoSheepKit.LanguageModelError.Kind)] = [
+            (.contextSizeExceeded(.init(contextSize: 8192, tokenCount: 9000, debugDescription: "too big")), .contextTooLarge),
+            (.guardrailViolation(.init(debugDescription: "no")), .refused),
+            (.unsupportedLanguageOrLocale(.init(languageCode: "nn", debugDescription: "nn")), .unsupportedLanguage),
+            (.rateLimited(.init(resetDate: nil, debugDescription: "slow down")), .other),
+        ]
+        for (failure, kind) in cases {
+            let described = AppleAI.describe(failure)
+            #expect(described.kind == kind, "\(failure)")
+            #expect(described.description.hasPrefix("generate: "))
+        }
+        #expect(AppleAI.describe(CancellationError()).kind == .other)
+    }
+
+    @Test func everySettingsLanguageHasALanguageCode() {
+        #expect(Set(AppleAI.languageCodes.keys) == Set(SettingsModel.languages.map(\.value)))
+        // Unknown keys never raise a warning.
+        #expect(AppleAI.supportsLanguage("klingon"))
+    }
+
+    @Test(.enabled(if: SystemLanguageModel.default.isAvailable))
+    func theModelReportsItsContextWindowAndEnglish() {
+        #expect(AppleAI.contextSize >= 4096)
+        #expect(AppleAI.supportsLanguage("english"))
+    }
+
     @Test func unavailableReasonMapsTheSystemAvailability() {
         let reason = AppleAI().unavailableReason()
         switch SystemLanguageModel.default.availability {

@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureMoment: { AppEvents.shared.captureMoment.emit() },
             commentNow: { controller.commentNow() },
             togglePause: { controller.togglePause() },
+            isPaused: { controller.isPaused },
             debugCapture: { controller.debugCaptureFromMenu() },
             debugCommand: { AppEvents.shared.debugCommand.emit($0) },
             claudeHooksStatus: { claudeHooks.status() },

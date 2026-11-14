@@ -39,6 +39,8 @@ final class AppController {
     private(set) var mcpStartTask: Task<Void, Never>?
     /// The last "Comment Now" run (tests await it).
     private(set) var commentNowTask: Task<Void, Never>?
+    /// A "Comment Now" run is in flight: further clicks are ignored until it ends.
+    private var isCommentingNow = false
     /// The last menu-triggered debug capture (tests await it).
     private(set) var debugCaptureTask: Task<Void, Never>?
 
@@ -142,6 +144,12 @@ final class AppController {
                     try await mcp.start(port: port, token: token)
                 } catch {
                     Log.info("mcp", "error: server disabled: \(VisionPipeline.describe(error))")
+                    // Without the listener there is no MCP narration and no
+                    // lambs. Nothing else would ever tell the human why.
+                    if !Task.isCancelled {
+                        events.sheepCommentary.emit(CommentaryEvent(
+                            text: Self.serverFailureLine(port: port), animation: nil))
+                    }
                 }
             }
         } else {
@@ -187,25 +195,51 @@ final class AppController {
 
     // MARK: - Pause and manual commentary
 
-    /// ex-`COMMENTARY_PAUSED`.
+    /// ex-`COMMENTARY_PAUSED`: the sheep has stopped looking at the screen on
+    /// its own. Only the screen commentary loop rests; the flock's own life,
+    /// break reminders, "Comment Now", chat and anything Claude Code reports
+    /// carry on. Not persisted: a restart starts looking again.
     var isPaused: Bool { vision.isPaused }
 
     /// The tray/app-menu "Pause Commentary" item: flips the flag.
     func togglePause() {
         vision.isPaused.toggle()
+        Log.info("app", vision.isPaused ? "Commentary paused" : "Commentary resumed")
     }
 
-    /// The menu's "Comment Now": one pipeline run in the background, ignoring
-    /// the pause flag. Failures are logged, never shown.
+    /// The menu's "Comment Now": one pipeline run in the background. The
+    /// human asked, so it ignores the pause flag, comments even on a boring
+    /// screen, and says so when it fails (the loop only logs model errors).
+    /// A click while a run is in flight is ignored: two runs would only
+    /// talk over each other.
     func commentNow() {
-        commentNowTask = Task { [vision] in
+        guard !isCommentingNow else {
+            Log.info("app", "Manual commentary already in flight")
+            return
+        }
+        isCommentingNow = true
+        commentNowTask = Task { [weak self, vision, events] in
             Log.info("app", "Manual commentary triggered")
             do {
-                try await vision.runVisionPipeline()
+                try await vision.runVisionPipeline(manual: true)
             } catch {
-                Log.info("app", "error: Manual commentary failed: \(VisionPipeline.describe(error))")
+                let msg = VisionPipeline.describe(error)
+                Log.info("app", "error: Manual commentary failed: \(msg)")
+                if !Task.isCancelled {
+                    let line = VisionPipeline.isCaptureError(error, msg)
+                        ? VisionPipeline.SCREEN_ERROR_LINE
+                        : Self.chatFailureLine(language: Config.getLanguage())
+                    events.sheepCommentary.emit(CommentaryEvent(text: line, animation: nil))
+                }
             }
+            self?.isCommentingNow = false
         }
+    }
+
+    /// Said when the local server could not start (the port is taken, most
+    /// likely by a second co-sheep).
+    static func serverFailureLine(port: UInt16) -> String {
+        "I couldn't open my local port (\(port)), so Claude Code can't reach me. Is another co-sheep running?"
     }
 
     // MARK: - Commands

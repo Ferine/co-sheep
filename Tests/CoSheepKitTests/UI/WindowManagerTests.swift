@@ -23,7 +23,7 @@ extension BrainTests {
 
         @Test func everyKindOpensWithTheTauriTitleSizeAndResizability() {
             let expected: [(WindowKind, String, NSSize, Bool)] = [
-                (.naming, "Name your sheep!", NSSize(width: 380, height: 180), false),
+                (.naming, "Name your sheep!", NSSize(width: 380, height: 200), false),
                 (.memory, "Sheep's Brain", NSSize(width: 550, height: 600), true),
                 (.settings, "co-sheep Settings", NSSize(width: 420, height: 600), false),
                 (.friends, "Manage Friends", NSSize(width: 400, height: 550), false),

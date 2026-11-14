@@ -1,7 +1,10 @@
 import AppKit
+import SwiftUI
 
-/// Ex-input-bubble.ts: the chat bubble with a text field, hosted as a native
-/// view over the SKView. Styled after `.speech-bubble.input-bubble` CSS.
+/// Ex-input-bubble.ts: the chat box with a text field, hosted as a native
+/// view over the SKView. A Liquid Glass panel with the system's own controls
+/// (see `InputBubbleView`); the web page's dark `.speech-bubble.input-bubble`
+/// look is gone.
 struct InputBubbleConfig {
     var promptText: String
     var placeholder: String
@@ -90,9 +93,9 @@ final class InputBubble {
         let bubbleX = sheepX + sheepSize / 2
         let bubbleY = sheepY - 20
         let halfW = Double(size.width) / 2
-        // The view includes the tail below the box; CSS sizes/positions the
-        // box alone (the tail is an absolutely positioned pseudo-element).
-        let tail = Double(BubbleStyle.tailOuter)
+        // The view includes the tail below the box; the box alone is what
+        // gets sized and positioned.
+        let tail = Double(BubbleStyle.tail)
         let boxH = Double(size.height) - tail
         let clampedX = max(halfW + 4, min(bubbleX, innerW - halfW - 4))
         // Clamp against the top edge too — the chat input must stay visible
@@ -107,40 +110,77 @@ final class InputBubble {
 
 // MARK: - View
 
-private enum BubbleStyle {
-    static let background = NSColor(srgbRed: 0x1a / 255, green: 0x1a / 255, blue: 0x2e / 255, alpha: 1)
-    static let border = NSColor(srgbRed: 0xe9 / 255, green: 0x45 / 255, blue: 0x60 / 255, alpha: 1)
-    static let borderHover = NSColor(srgbRed: 1, green: 0x6b / 255, blue: 0x6b / 255, alpha: 1)
-    static let text = NSColor(srgbRed: 0xee / 255, green: 0xee / 255, blue: 0xee / 255, alpha: 1)
-    static let inputBackground = NSColor(srgbRed: 0x16 / 255, green: 0x21 / 255, blue: 0x3e / 255, alpha: 1)
-    static let loading = NSColor(srgbRed: 0x88 / 255, green: 0x88 / 255, blue: 0x88 / 255, alpha: 1)
-    static let error = NSColor(srgbRed: 1, green: 0x6b / 255, blue: 0x6b / 255, alpha: 1)
+/// Metrics and text styles of the chat box.
+enum BubbleStyle {
+    /// The app's accent (#e94560), for the Send button.
+    static let accent = NSColor(srgbRed: 0xe9 / 255, green: 0x45 / 255, blue: 0x60 / 255, alpha: 1)
 
-    /// CSS `.speech-bubble-text { line-height: 1.4 }`.
-    static func textAttributes(_ font: NSFont, _ color: NSColor) -> [NSAttributedString.Key: Any] {
-        let p = NSMutableParagraphStyle()
-        p.minimumLineHeight = font.pointSize * 1.4
-        p.maximumLineHeight = font.pointSize * 1.4
-        return [.font: font, .foregroundColor: color, .paragraphStyle: p]
-    }
-
-    static func font(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
-        var font = NSFont(name: "Courier New", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
-        var traits: NSFontTraitMask = []
-        if bold { traits.insert(.boldFontMask) }
-        if italic { traits.insert(.italicFontMask) }
-        if !traits.isEmpty { font = NSFontManager.shared.convert(font, toHaveTrait: traits) }
-        return font
-    }
-
-    // CSS: width 300 (max-width; the flex form fills it), padding 12/16, border 2.
-    static let width: CGFloat = 300
+    static let width: CGFloat = 320
     static let padX: CGFloat = 16
-    static let padY: CGFloat = 12
-    static let borderWidth: CGFloat = 2
-    static let radius: CGFloat = 12
-    static let tailOuter: CGFloat = 11
-    static let tailInner: CGFloat = 8
+    static let padY: CGFloat = 14
+    static let radius: CGFloat = 20
+    /// Height of the tail that points down at the sheep.
+    static let tail: CGFloat = 11
+    static let tailWidth: CGFloat = 26
+    static let fieldHeight: CGFloat = 30
+    /// Diameter of the round close button.
+    static let closeSize: CGFloat = 28
+    /// A long reply scrolls inside this height.
+    static let replyMaxHeight: CGFloat = 120
+
+    static func font(italic: Bool = false) -> NSFont {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        return italic ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) : font
+    }
+
+    static func text(_ string: String, color: NSColor = .labelColor, italic: Bool = false) -> NSAttributedString {
+        NSAttributedString(string: string, attributes: [.font: font(italic: italic), .foregroundColor: color])
+    }
+}
+
+/// The outline of the chat box: a rounded panel with a soft tail at the bottom
+/// centre, pointing at the sheep it belongs to (what a popover's arrow does).
+nonisolated struct ChatBubbleShape: Shape {
+    var radius: CGFloat
+    var tail: CGFloat
+    var tailWidth: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let box = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(0, rect.height - tail))
+        let r = min(radius, box.height / 2, box.width / 2)
+        let cx = box.midX
+        let half = min(tailWidth / 2, max(0, box.width / 2 - r))
+        var p = Path()
+        p.move(to: CGPoint(x: box.minX + r, y: box.minY))
+        p.addLine(to: CGPoint(x: box.maxX - r, y: box.minY))
+        p.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY),
+                 tangent2End: CGPoint(x: box.maxX, y: box.minY + r), radius: r)
+        p.addLine(to: CGPoint(x: box.maxX, y: box.maxY - r))
+        p.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY),
+                 tangent2End: CGPoint(x: box.maxX - r, y: box.maxY), radius: r)
+        // The tail: two shallow curves meeting at the tip.
+        p.addLine(to: CGPoint(x: cx + half, y: box.maxY))
+        p.addQuadCurve(to: CGPoint(x: cx, y: rect.maxY), control: CGPoint(x: cx + half * 0.35, y: box.maxY))
+        p.addQuadCurve(to: CGPoint(x: cx - half, y: box.maxY), control: CGPoint(x: cx - half * 0.35, y: box.maxY))
+        p.addLine(to: CGPoint(x: box.minX + r, y: box.maxY))
+        p.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY),
+                 tangent2End: CGPoint(x: box.minX, y: box.maxY - r), radius: r)
+        p.addLine(to: CGPoint(x: box.minX, y: box.minY + r))
+        p.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY),
+                 tangent2End: CGPoint(x: box.minX + r, y: box.minY), radius: r)
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// The glass the chat box is made of, in the box's own shape.
+private struct ChatBubbleGlass: View {
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .glassEffect(.regular, in: ChatBubbleShape(
+                radius: BubbleStyle.radius, tail: BubbleStyle.tail, tailWidth: BubbleStyle.tailWidth))
+    }
 }
 
 /// Text field that reports Escape (ex-keydown "Escape" listener).
@@ -150,48 +190,52 @@ private final class BubbleTextField: NSTextField {
     override func cancelOperation(_ sender: Any?) { onEscape?() }
 }
 
-private final class InputBubbleView: NSView {
+/// The chat box: Liquid Glass in the shape of a speech bubble, with the
+/// sheep's line, a close button, a text field and a Send button. The controls
+/// are AppKit's own (glass bezels, system font and colors), so the box
+/// follows the system appearance like any other panel.
+final class InputBubbleView: NSView {
     var onSubmit: ((String) -> Void)?
+    /// Escape, or the close button: the human is done chatting.
     var onEscape: (() -> Void)? {
         didSet { input.onEscape = onEscape }
     }
 
+    private let glass = NSHostingView(rootView: ChatBubbleGlass())
     private let prompt = NSTextField(wrappingLabelWithString: "")
     private let replyScroll = NSScrollView()
     private let replyText = NSTextView()
     private let input = BubbleTextField()
-    private let button = NSButton()
+    private let inputWell = NSBox()
+    /// The X in the corner. Internal so tests can click it.
+    let closeButton = NSButton()
+    let sendButton = NSButton()
     private let stack = NSStackView()
     private let promptText: String
+    private var replyHeight: NSLayoutConstraint?
 
     init(promptText: String, placeholder: String, buttonText: String) {
         self.promptText = promptText
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.masksToBounds = false
-        shadow = {
-            let s = NSShadow()
-            s.shadowColor = NSColor.black.withAlphaComponent(0.3)
-            s.shadowBlurRadius = 12
-            s.shadowOffset = NSSize(width: 0, height: -4)
-            return s
-        }()
 
-        prompt.attributedStringValue = NSAttributedString(
-            string: promptText, attributes: BubbleStyle.textAttributes(BubbleStyle.font(14), BubbleStyle.text))
+        glass.sizingOptions = []
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glass)
+
+        prompt.attributedStringValue = BubbleStyle.text(promptText)
         prompt.isSelectable = false
 
         replyText.isEditable = false
         replyText.isSelectable = true
         replyText.drawsBackground = false
-        replyText.font = BubbleStyle.font(14)
-        replyText.textColor = BubbleStyle.text
+        replyText.font = BubbleStyle.font()
+        replyText.textColor = .labelColor
         replyText.textContainerInset = .zero
         replyText.textContainer?.lineFragmentPadding = 0
         replyText.isVerticallyResizable = true
         replyText.isHorizontallyResizable = false
         replyText.autoresizingMask = [.width]
-        // Let the document view grow past the 120px clip so long replies scroll.
+        // Let the document view grow past the clip so long replies scroll.
         replyText.minSize = NSSize(width: 0, height: 0)
         replyText.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         replyText.textContainer?.widthTracksTextView = true
@@ -202,72 +246,113 @@ private final class InputBubbleView: NSView {
         replyScroll.borderType = .noBorder
         replyScroll.isHidden = true
 
-        input.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
-            .font: BubbleStyle.font(13), .foregroundColor: BubbleStyle.loading,
-        ])
-        input.font = BubbleStyle.font(13)
-        input.textColor = BubbleStyle.text
+        // The one way out that needs no keyboard: a round glass X in the
+        // top right corner, where a panel's close button is expected.
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close chat")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .heavy))
+        closeButton.imagePosition = .imageOnly
+        closeButton.imageScaling = .scaleNone
+        closeButton.contentTintColor = .labelColor
+        closeButton.bezelStyle = .glass
+        closeButton.controlSize = .large
+        closeButton.toolTip = "Close chat (Esc)"
+        closeButton.setAccessibilityLabel("Close chat")
+        closeButton.target = self
+        closeButton.action = #selector(close)
+        closeButton.setContentHuggingPriority(.required, for: .horizontal)
+        closeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // The field sits in a capsule well, like the system's search fields.
+        input.placeholderAttributedString = BubbleStyle.text(placeholder, color: .placeholderTextColor)
+        input.font = BubbleStyle.font()
+        input.textColor = .labelColor
         input.isBordered = false
         input.drawsBackground = false
         input.focusRingType = .none
-        input.wantsLayer = true
-        input.layer?.backgroundColor = BubbleStyle.inputBackground.cgColor
-        input.layer?.borderColor = BubbleStyle.border.cgColor
-        input.layer?.borderWidth = 1
-        input.layer?.cornerRadius = 6
         input.target = self
         input.action = #selector(submit)
         (input.cell as? NSTextFieldCell)?.usesSingleLineMode = true
         input.cell?.isScrollable = true
+        input.translatesAutoresizingMaskIntoConstraints = false
 
-        button.title = buttonText
-        button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.backgroundColor = BubbleStyle.border.cgColor
-        button.layer?.cornerRadius = 6
-        button.attributedTitle = NSAttributedString(string: buttonText, attributes: [
-            .font: BubbleStyle.font(13, bold: true), .foregroundColor: NSColor.white,
-        ])
-        button.target = self
-        button.action = #selector(submit)
+        inputWell.boxType = .custom
+        inputWell.titlePosition = .noTitle
+        inputWell.cornerRadius = BubbleStyle.fieldHeight / 2
+        inputWell.fillColor = .quaternarySystemFill
+        inputWell.borderColor = .separatorColor
+        inputWell.borderWidth = 1
+        inputWell.contentViewMargins = .zero
+        inputWell.addSubview(input)
 
-        let form = NSStackView(views: [input, button])
+        sendButton.title = buttonText
+        sendButton.bezelStyle = .glass
+        sendButton.bezelColor = BubbleStyle.accent
+        sendButton.controlSize = .large
+        sendButton.target = self
+        sendButton.action = #selector(submit)
+        sendButton.setContentHuggingPriority(.required, for: .horizontal)
+        sendButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let texts = NSStackView(views: [prompt, replyScroll])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 0
+
+        texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        // The text takes the row; the X keeps to the corner.
+        let header = NSStackView(views: [texts, closeButton])
+        header.orientation = .horizontal
+        header.distribution = .fill
+        header.alignment = .top
+        header.spacing = 10
+
+        let form = NSStackView(views: [inputWell, sendButton])
         form.orientation = .horizontal
+        form.distribution = .fill
         form.spacing = 8
         form.alignment = .centerY
+        inputWell.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 4
-        stack.addArrangedSubview(prompt)
-        stack.addArrangedSubview(replyScroll)
+        stack.spacing = 12
+        stack.addArrangedSubview(header)
         stack.addArrangedSubview(form)
-        stack.setCustomSpacing(10, after: replyScroll)
-        stack.setCustomSpacing(10, after: prompt)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
-        let contentW = BubbleStyle.width - 2 * (BubbleStyle.padX + BubbleStyle.borderWidth)
-        let inset = BubbleStyle.padX + BubbleStyle.borderWidth
+        let contentW = BubbleStyle.width - 2 * BubbleStyle.padX
+        let replyHeight = replyScroll.heightAnchor.constraint(equalToConstant: 0)
+        self.replyHeight = replyHeight
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: BubbleStyle.padY + BubbleStyle.borderWidth),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor,
-                                          constant: -(BubbleStyle.padY + BubbleStyle.borderWidth + BubbleStyle.tailOuter)),
-            stack.widthAnchor.constraint(equalToConstant: contentW),
-            prompt.widthAnchor.constraint(equalToConstant: contentW),
-            replyScroll.widthAnchor.constraint(equalToConstant: contentW),
-            form.widthAnchor.constraint(equalToConstant: contentW),
-            input.heightAnchor.constraint(equalToConstant: 28),
-            button.heightAnchor.constraint(equalToConstant: 28),
-            button.widthAnchor.constraint(equalToConstant: button.attributedTitle.size().width + 28),
-        ])
-        replyHeight = replyScroll.heightAnchor.constraint(equalToConstant: 0)
-        replyHeight?.isActive = true
-    }
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glass.topAnchor.constraint(equalTo: topAnchor),
+            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-    private var replyHeight: NSLayoutConstraint?
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: BubbleStyle.padX),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -BubbleStyle.padX),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: BubbleStyle.padY),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -(BubbleStyle.padY + BubbleStyle.tail)),
+            stack.widthAnchor.constraint(equalToConstant: contentW),
+            header.widthAnchor.constraint(equalToConstant: contentW),
+            form.widthAnchor.constraint(equalToConstant: contentW),
+            prompt.widthAnchor.constraint(equalTo: texts.widthAnchor),
+            replyScroll.widthAnchor.constraint(equalTo: texts.widthAnchor),
+            replyHeight,
+
+            closeButton.widthAnchor.constraint(equalToConstant: BubbleStyle.closeSize),
+            closeButton.heightAnchor.constraint(equalToConstant: BubbleStyle.closeSize),
+            // One line of text sits level with the X; more lines grow down.
+            texts.heightAnchor.constraint(greaterThanOrEqualToConstant: BubbleStyle.closeSize),
+
+            inputWell.heightAnchor.constraint(equalToConstant: BubbleStyle.fieldHeight),
+            input.leadingAnchor.constraint(equalTo: inputWell.leadingAnchor, constant: 12),
+            input.trailingAnchor.constraint(equalTo: inputWell.trailingAnchor, constant: -12),
+            input.centerYAnchor.constraint(equalTo: inputWell.centerYAnchor),
+        ])
+    }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -276,6 +361,10 @@ private final class InputBubbleView: NSView {
 
     func focusInput() {
         window?.makeFirstResponder(input)
+    }
+
+    @objc private func close() {
+        onEscape?()
     }
 
     @objc private func submit() {
@@ -289,75 +378,35 @@ private final class InputBubbleView: NSView {
         prompt.isHidden = true
         replyScroll.isHidden = false
         replyScroll.alphaValue = 1
-        replyText.textStorage?.setAttributedString(NSAttributedString(
-            string: text,
-            attributes: BubbleStyle.textAttributes(BubbleStyle.font(14, italic: isError),
-                                                   isError ? BubbleStyle.error : BubbleStyle.text)))
-        // CSS: max-height 120, overflow-y auto.
+        replyText.textStorage?.setAttributedString(
+            BubbleStyle.text(text, color: isError ? .systemRed : .labelColor, italic: isError))
+        // A long reply scrolls rather than growing the box without end.
+        layoutSubtreeIfNeeded()
         if let lm = replyText.layoutManager, let tc = replyText.textContainer {
-            tc.containerSize = NSSize(width: replyScroll.contentSize.width > 0 ? replyScroll.contentSize.width
-                                          : BubbleStyle.width - 2 * (BubbleStyle.padX + BubbleStyle.borderWidth),
-                                      height: .greatestFiniteMagnitude)
+            let width = replyScroll.contentSize.width > 0
+                ? replyScroll.contentSize.width : BubbleStyle.width - 2 * BubbleStyle.padX
+            tc.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             lm.ensureLayout(for: tc)
-            replyHeight?.constant = min(120, ceil(lm.usedRect(for: tc).height))
+            replyHeight?.constant = min(BubbleStyle.replyMaxHeight, ceil(lm.usedRect(for: tc).height))
         }
         input.isEnabled = true
-        button.isEnabled = true
-        button.alphaValue = 1
-        input.alphaValue = 1
+        sendButton.isEnabled = true
         focusInput()
         needsLayout = true
     }
 
     func setLoading(_ on: Bool, promptText: String) {
         input.isEnabled = !on
-        button.isEnabled = !on
-        input.alphaValue = on ? 0.5 : 1
-        button.alphaValue = on ? 0.5 : 1
+        sendButton.isEnabled = !on
         // The previous reply stays visible (it's the conversation context) but
         // dims while the next one is being thought up
         replyScroll.alphaValue = on ? 0.5 : 1
         if on {
             // showReply hides the prompt line — bring it back for "thinking..."
             prompt.isHidden = false
-            prompt.attributedStringValue = NSAttributedString(
-                string: "thinking...",
-                attributes: BubbleStyle.textAttributes(BubbleStyle.font(14, italic: true), BubbleStyle.loading))
+            prompt.attributedStringValue = BubbleStyle.text("thinking...", color: .secondaryLabelColor, italic: true)
         } else {
-            prompt.attributedStringValue = NSAttributedString(
-                string: promptText, attributes: BubbleStyle.textAttributes(BubbleStyle.font(14), BubbleStyle.text))
+            prompt.attributedStringValue = BubbleStyle.text(promptText)
         }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let tail = BubbleStyle.tailOuter
-        let box = NSRect(x: BubbleStyle.borderWidth / 2, y: tail + BubbleStyle.borderWidth / 2,
-                         width: bounds.width - BubbleStyle.borderWidth,
-                         height: bounds.height - tail - BubbleStyle.borderWidth)
-        let path = NSBezierPath(roundedRect: box, xRadius: BubbleStyle.radius, yRadius: BubbleStyle.radius)
-        BubbleStyle.background.setFill()
-        path.fill()
-        BubbleStyle.border.setStroke()
-        path.lineWidth = BubbleStyle.borderWidth
-        path.stroke()
-
-        // Tail: outer triangle in the border color, inner in the background.
-        let cx = bounds.midX
-        let bottom = box.minY - BubbleStyle.borderWidth / 2
-        let outer = NSBezierPath()
-        outer.move(to: NSPoint(x: cx - tail, y: bottom))
-        outer.line(to: NSPoint(x: cx, y: bottom - tail))
-        outer.line(to: NSPoint(x: cx + tail, y: bottom))
-        outer.close()
-        BubbleStyle.border.setFill()
-        outer.fill()
-        let innerH = BubbleStyle.tailInner
-        let inner = NSBezierPath()
-        inner.move(to: NSPoint(x: cx - innerH, y: bottom + 0.5))
-        inner.line(to: NSPoint(x: cx, y: bottom - innerH))
-        inner.line(to: NSPoint(x: cx + innerH, y: bottom + 0.5))
-        inner.close()
-        BubbleStyle.background.setFill()
-        inner.fill()
     }
 }

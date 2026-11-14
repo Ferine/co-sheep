@@ -151,6 +151,24 @@ extension BrainTests {
             #expect(SimISO.timestamp(-1) == "1969-12-31T23:59:59.999Z")
         }
 
+        // MARK: moods
+
+        @Test func aDramaMinuteLetsMoodsFollowTheDay() {
+            withBrainRoot { _ in
+                let s = Stage()
+                defer { s.close() }
+                FriendMemory.ensureBrain("a", "A")
+                FriendMemory.ensureBrain("b", "B")
+                for _ in 0..<5 { FriendMemory.recordConversation("a", "b", "tabs") }
+                #expect(FriendMemory.getAllMoods() == ["a": "happy", "b": "happy"])
+
+                s.dice.script = Stage.sparks(3)
+                s.manager.tick()
+
+                #expect(FriendMemory.getAllMoods() == ["a": "excited", "b": "excited"])
+            }
+        }
+
         // MARK: persistence (drama.json)
 
         @Test func startWithoutSavedStateKeepsFreshDefaults() {

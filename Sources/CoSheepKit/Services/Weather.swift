@@ -231,13 +231,16 @@ final class Weather {
     /// Maps weather description to a simplified key for the overlay's effects.
     nonisolated static func simplifyCondition(_ desc: String) -> String {
         let desc = desc.lowercased()
-        if desc.contains("rain") || desc.contains("drizzle") || desc.contains("shower") {
-            return "rain"
-        } else if desc.contains("snow") || desc.contains("blizzard") || desc.contains("sleet") || desc.contains("ice") {
+        // Snow before rain: "Light snow showers" is snow, and the bare
+        // "shower" keyword would otherwise make it rain all winter.
+        if desc.contains("snow") || desc.contains("blizzard") || desc.contains("sleet") || desc.contains("ice") {
             return "snow"
+        } else if desc.contains("rain") || desc.contains("drizzle") || desc.contains("shower") {
+            return "rain"
         } else if desc.contains("fog") || desc.contains("mist") || desc.contains("haze") {
             return "fog"
-        } else if desc.contains("cloud") || desc.contains("overcast") {
+        } else if desc.contains("cloud") || desc.contains("overcast") || desc.contains("thunder") {
+            // "Thundery outbreaks possible" has no rain yet, but it is no clear sky either.
             return "cloudy"
         } else {
             return "clear"

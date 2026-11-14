@@ -39,7 +39,7 @@ enum WindowKind: CaseIterable {
     /// Size in points of the area below the window's bar (Tauri `inner_size`).
     var size: NSSize {
         switch self {
-        case .naming: NSSize(width: 380, height: 180)
+        case .naming: NSSize(width: 380, height: 200)
         case .memory: NSSize(width: 550, height: 600)
         case .settings: NSSize(width: 420, height: 600)
         case .friends: NSSize(width: 400, height: 550)

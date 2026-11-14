@@ -44,28 +44,29 @@ struct NamingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
-            // A dialog's own controls: standard push buttons, at the size
-            // where the system draws them as capsules.
-            HStack(spacing: 8) {
-                TextField("Name your sheep...", text: $model.name)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 210)
-                    .focused($focused)
-                    .onSubmit(submit)
-                // Return is handled by the field's `onSubmit`; a default-button
-                // shortcut on top of it would submit twice.
-                Button("OK", action: submit)
-                    .buttonStyle(.borderedProminent)
-            }
-            .controlSize(.large)
-
-            if let error = model.errorMessage {
-                Text(error).font(.callout).foregroundStyle(.red)
-            }
+            TextField("Name your sheep...", text: $model.name)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                .focused($focused)
+                .onSubmit(submit)
         }
-        .padding(UITheme.margin)
+        .padding(.horizontal, UITheme.margin)
+        .padding(.top, UITheme.margin)
         .tint(UITheme.accent)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The same glass action bar as every other dialog.
+        .dialogBar {
+            Text(model.errorMessage ?? "")
+                .font(.callout)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Return is handled by the field's `onSubmit`; a default-button
+            // shortcut on top of it would submit twice.
+            Button("OK", action: submit)
+                .buttonStyle(.glassProminent)
+                .tint(UITheme.accent)
+        }
         .onAppear { focused = true }
     }
 

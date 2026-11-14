@@ -33,6 +33,8 @@ final class OverlayController: OverlayDriver {
     private var personality = "snarky"
     private var shepherd: Shepherd?
     private var shepherdEnabled = true
+    /// The weather location last applied, to refetch when it changes.
+    private var weatherLocation: String?
 
     // Drag state
     private var isDragging = false
@@ -233,11 +235,18 @@ final class OverlayController: OverlayDriver {
         personality = cfg.personality.isEmpty ? "snarky" : cfg.personality
         flock.herd.isEnabled = cfg.herdEnabled
         flock.herd.maxLambs = cfg.effectiveMaxLambs
-        shepherdEnabled = cfg.shepherdCommentary
+        // No lambs on screen, nothing to shepherd: remarks about sheep the
+        // human can't see would come out of nowhere.
+        shepherdEnabled = cfg.shepherdCommentary && cfg.herdEnabled
         breakReminder.setEnabled(cfg.breakReminders)
         flock.setEasterMode(EasterMode(rawValue: cfg.easterMode) ?? .auto)
         flock.setSummerMode(SummerMode(rawValue: cfg.summerMode) ?? .auto)
         flock.setChristmasMode(ChristmasMode(rawValue: cfg.christmasMode) ?? .auto)
+        // A new city shows its weather now, not at the next five-minute poll.
+        if let previous = weatherLocation, previous != cfg.weatherLocation {
+            pollWeather()
+        }
+        weatherLocation = cfg.weatherLocation
     }
 
     private func screenChanged() {
@@ -253,7 +262,7 @@ final class OverlayController: OverlayDriver {
     func update(dt: Double) {
         flock.update(dt)
         // Break reminder check
-        breakReminder.update(dt, flock.main.state, flock.mainBubble, personality) { [weak self] anim in
+        breakReminder.update(dt, flock.mainBubble, personality) { [weak self] anim in
             self?.flock.main.playAnimation(anim)
             self?.flock.echoBreakReminder()
         }

@@ -116,9 +116,7 @@ extension BrainTests {
             ("modelNotReady",
              "Apple Intelligence is still downloading its model... I'll keep checking. Baa-tience."),
             ("deviceNotEligible",
-             "This Mac can't run Apple Intelligence — I need Apple Silicon and macOS 26 to think. Sorry!"),
-            ("requiresMacOS26",
-             "This Mac can't run Apple Intelligence — I need Apple Silicon and macOS 26 to think. Sorry!"),
+             "This Mac can't run Apple Intelligence, and I need it to think. Sorry!"),
             ("somethingNew",
              "I can't reach the on-device Apple Intelligence model. Check System Settings > Apple Intelligence & Siri."),
         ])
@@ -224,6 +222,20 @@ extension BrainTests {
 
                 #expect(rig.commentary.texts == (surfaced ? [VisionPipeline.SCREEN_ERROR_LINE] : []))
                 #expect(!rig.pipeline.isTickRunning)
+            }
+        }
+
+        @Test func aLanguageTheModelCannotWorkInIsSaidOnce() async throws {
+            try await withBrainRoot { _ in
+                try Config.updateConfig { $0.language = "korean" }
+                let rig = VisionRig(sleepLimit: 4)
+                rig.model.generateFailure = LanguageModelError("generate: unsupported language", kind: .unsupportedLanguage)
+
+                await rig.pipeline.run()
+
+                // Three failing ticks, one bubble.
+                #expect(rig.screen.captureCount == 4)
+                #expect(rig.commentary.texts == [VisionPipeline.languageErrorLine("korean")])
             }
         }
 

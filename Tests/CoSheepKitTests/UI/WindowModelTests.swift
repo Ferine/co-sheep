@@ -59,12 +59,22 @@ extension BrainTests {
             #expect(SettingsModel.languages.map(\.value) == [
                 "nynorsk", "bokmål", "english", "swedish", "danish", "german", "french", "spanish", "japanese", "korean",
             ])
-            #expect(SettingsModel.easterModes.map(\.label) == ["Auto (seasonal only)", "Always on", "Always off"])
-            #expect(SettingsModel.summerModes.map(\.label) == ["Auto (summer weather only)", "Always on", "Always off"])
+            #expect(SettingsModel.easterModes.map(\.label) == ["Auto (Easter week)", "Always on", "Always off"])
+            #expect(SettingsModel.summerModes.map(\.label) == ["Auto (June–August)", "Always on", "Always off"])
             #expect(SettingsModel.christmasModes.map(\.label) == [
                 "Auto (December 1 – January 6)", "Always on", "Always off",
             ])
             #expect(SettingsModel.christmasModes.map(\.value) == ChristmasMode.allCases.map(\.rawValue))
+        }
+
+        @Test func theLanguageNoteWarnsAboutALanguageTheModelDoesNotList() {
+            let m = SettingsModel()
+            m.supportsLanguage = { $0 != "nynorsk" }
+            m.language = "bokmål"
+            #expect(m.languageNote == "The language your sheep speaks in.")
+            m.language = "nynorsk"
+            #expect(m.languageNote == "The language your sheep speaks in. Apple Intelligence doesn't list Nynorsk "
+                + "as supported on this Mac, so expect slips into other languages.")
         }
 
         @Test func unknownSavedValueStaysSelectable() {

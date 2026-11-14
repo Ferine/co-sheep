@@ -134,7 +134,7 @@ func computeEasterSunday(_ year: Int) -> Date {
 /// system calendar (Buddhist, Japanese…), which would shift years/months.
 nonisolated let gregorian: Calendar = {
     var c = Calendar(identifier: .gregorian)
-    c.timeZone = .current
+    c.timeZone = .autoupdatingCurrent // like `SimClock.calendar`: follows a zone change mid-session
     return c
 }()
 

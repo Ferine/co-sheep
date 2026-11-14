@@ -686,6 +686,10 @@ final class Flock {
 
     func setSummerMode(_ mode: SummerMode) {
         summerTheme.setModeOverride(mode)
+        // Off, or auto outside the season: no sun left to bathe in.
+        if !summerTheme.active && groupActivity?.type == .sunbathe {
+            clearGroupActivity(true)
+        }
     }
 
     func setChristmasMode(_ mode: ChristmasMode) {
@@ -1119,10 +1123,14 @@ final class Flock {
             break
         case .animation(let animation):
             main.playAnimation(animation)
-        case .juletregang:
-            startChristmasActivity(.juletregang)
-        case .giftExchange:
-            startChristmasActivity(.giftExchange)
+        case .juletregang, .giftExchange:
+            // Nobody free to come along (everyone else is falling, feuding
+            // or being carried): the door still gets a surprise rather than
+            // a bubble and nothing else.
+            let type: GroupActivityType = entry.effect == .giftExchange ? .giftExchange : .juletregang
+            if !startChristmasActivity(type) {
+                christmasTheme.startLightShow()
+            }
         case .sleigh:
             startSpectacle(.sleigh)
         case .flurry:

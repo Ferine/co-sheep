@@ -120,11 +120,14 @@ struct WeatherTests {
         ("Light sleet", "snow"), ("Ice pellets", "snow"),
         ("Fog", "fog"), ("Freezing fog", "fog"), ("Mist", "fog"), ("Haze", "fog"),
         ("Partly cloudy", "cloudy"), ("Cloudy", "cloudy"), ("Overcast", "cloudy"),
-        ("Sunny", "clear"), ("Clear", "clear"), ("Thundery outbreaks possible", "clear"), ("", "clear"),
-        // The branches are tested in order, so "shower" wins over "snow"/"ice" (ported as-is).
-        ("Moderate or heavy snow showers", "rain"),
-        ("Moderate or heavy showers of ice pellets", "rain"),
-        ("Light sleet showers", "rain"),
+        ("Sunny", "clear"), ("Clear", "clear"), ("", "clear"),
+        ("Thundery outbreaks possible", "cloudy"), ("Patchy light rain with thunder", "rain"),
+        ("Patchy light snow with thunder", "snow"),
+        // Snow is tested before rain, so a snow shower is snow, not rain.
+        ("Moderate or heavy snow showers", "snow"),
+        ("Moderate or heavy showers of ice pellets", "snow"),
+        ("Light sleet showers", "snow"),
+        ("Freezing rain", "rain"), ("Patchy freezing drizzle possible", "rain"),
     ] as [(String, String)])
     func simplifiesConditions(desc: String, expected: String) {
         #expect(Weather.simplifyCondition(desc) == expected)

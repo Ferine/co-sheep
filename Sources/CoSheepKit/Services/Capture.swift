@@ -24,8 +24,8 @@ nonisolated enum Capture {
 
     /// ex-`capture_screen`: the primary display, downscaled for OCR. Asks
     /// ScreenCaptureKit for the target size directly, so no full-resolution
-    /// copy is made just to be resized. Like xcap, the cursor is not captured
-    /// and our own overlay window is not excluded.
+    /// copy is made just to be resized. The cursor is not captured, and
+    /// neither are co-sheep's own windows (see `primaryDisplayFilter`).
     static func captureScreen() async throws -> CGImage {
         Log.debug("capture", "enumerating monitors...")
         let (filter, pixelWidth, pixelHeight) = try await primaryDisplayFilter()
@@ -71,6 +71,12 @@ nonisolated enum Capture {
     // MARK: - ScreenCaptureKit
 
     /// Content filter for the primary display plus its size in pixels.
+    ///
+    /// co-sheep's own windows are left out: the overlay sits on top of
+    /// everything, so the OCR would otherwise read the flock's speech
+    /// bubbles, name tags and holiday HUDs (and the Sheep's Brain window)
+    /// back in, and the sheep would end up commenting on its own chatter.
+    /// xcap had no way to do this; ScreenCaptureKit does.
     private static func primaryDisplayFilter() async throws -> (SCContentFilter, Int, Int) {
         let content = try await SCShareableContent.current
         Log.debug("capture", "found \(content.displays.count) monitor(s)")
@@ -79,7 +85,9 @@ nonisolated enum Capture {
                 ?? content.displays.first
         else { throw PlatformError("No monitor found") }
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let ownPid = ProcessInfo.processInfo.processIdentifier
+        let ourselves = content.applications.filter { $0.processID == ownPid }
+        let filter = SCContentFilter(display: display, excludingApplications: ourselves, exceptingWindows: [])
         let scale = Double(filter.pointPixelScale)
         let pixelWidth = Int((filter.contentRect.width * scale).rounded())
         let pixelHeight = Int((filter.contentRect.height * scale).rounded())

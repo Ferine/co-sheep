@@ -33,13 +33,13 @@ final class SettingsModel: WindowModel {
     ]
 
     static let easterModes = [
-        ChoiceOption(value: "auto", label: "Auto (seasonal only)"),
+        ChoiceOption(value: "auto", label: "Auto (Easter week)"),
         ChoiceOption(value: "on", label: "Always on"),
         ChoiceOption(value: "off", label: "Always off"),
     ]
 
     static let summerModes = [
-        ChoiceOption(value: "auto", label: "Auto (summer weather only)"),
+        ChoiceOption(value: "auto", label: "Auto (June–August)"),
         ChoiceOption(value: "on", label: "Always on"),
         ChoiceOption(value: "off", label: "Always off"),
     ]
@@ -67,6 +67,19 @@ final class SettingsModel: WindowModel {
     var shepherdCommentary = true
     var errorMessage: String?
     let saved = TimedFlag()
+
+    /// Whether the on-device model lists a language option as supported
+    /// (tests swap it for a fixed answer).
+    @ObservationIgnored var supportsLanguage: (String) -> Bool = { AppleAI.supportsLanguage($0) }
+
+    /// The line under the language picker, with a warning when the model
+    /// doesn't officially speak the chosen language (Nynorsk, for one).
+    var languageNote: String {
+        let base = "The language your sheep speaks in."
+        if supportsLanguage(language) { return base }
+        let label = Self.languages.first { $0.value == language }?.label ?? language
+        return base + " Apple Intelligence doesn't list \(label) as supported on this Mac, so expect slips into other languages."
+    }
 
     /// `formatInterval`: "45s", "2 min", "2.5 min".
     static func formatInterval(_ secs: Int) -> String {
@@ -142,7 +155,7 @@ struct SettingsView: View {
             }
 
             Section("AI") {
-                Text("Runs fully on-device with Apple Intelligence — free, private, nothing leaves your Mac. Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled.")
+                Text("Runs fully on-device with Apple Intelligence — free and private: what's on your screen never leaves your Mac. Requires Apple Silicon with Apple Intelligence enabled.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -182,7 +195,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("The language your sheep speaks in.")
+                Text(model.languageNote)
             }
 
             Section {
@@ -190,7 +203,7 @@ struct SettingsView: View {
                     "Weather Location", text: $model.weatherLocation,
                     prompt: Text("Oslo, London, Tokyo..."))
             } footer: {
-                Text("City name for weather awareness. Leave empty to disable.")
+                Text("City name for weather awareness, looked up at wttr.in — the one thing co-sheep sends over the network. Leave empty to disable.")
             }
 
             Section {
@@ -200,7 +213,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("Useful for testing the seasonal mode without waiting for the calendar.")
+                Text("Eggs to paint and hunt. Auto runs from the Tuesday before Easter Sunday to the Tuesday after.")
             }
 
             Section {
@@ -210,7 +223,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("Auto triggers in June–August when the weather is clear and warm (needs a weather location).")
+                Text("Sun, sunflowers and butterflies. With a weather location, Auto waits for a clear day of 18 °C or more.")
             }
 
             Section {

@@ -123,6 +123,21 @@ extension BrainTests {
             }
         }
 
+        @Test func aMissedDayEndsTheStreakBeforeTheNextHunt() {
+            withBrainRoot(now: localDate(2026, 4, 5)) { _ in
+                _ = playOn(2026, 4, 5)
+                _ = playOn(2026, 4, 6)
+                // The day after a hunt the streak is still there to extend...
+                SimClock.nowSource = { localDate(2026, 4, 7, 12).timeIntervalSince1970 * 1000 }
+                #expect(EasterMemory.getStats().currentStreak == 2)
+                // ...a day later it is gone (it used to linger until the next hunt).
+                SimClock.nowSource = { localDate(2026, 4, 8, 12).timeIntervalSince1970 * 1000 }
+                let stats = EasterMemory.getStats()
+                #expect(stats.currentStreak == 0)
+                #expect(stats.bestStreak == 2)
+            }
+        }
+
         @Test func streakGrowsOnConsecutiveDaysAndResetsAfterAGap() {
             withBrainRoot(now: localDate(2026, 4, 5)) { _ in
                 #expect(playOn(2026, 4, 5).currentStreak == 1)
