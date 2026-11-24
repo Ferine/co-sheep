@@ -1,0 +1,436 @@
+<title>co-sheep</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Silkscreen&display=swap">
+<script type="application/json" id="claude-artifacts-manifest">{"permissions": ["overlay", "menu-bar"]}</script>
+<style>
+/* Layout: one screen. A pretend desktop (wallpaper, menu bar, two windows, a
+   dock) with the flock's canvas over it; in the installed app the desktop
+   goes away and the window itself turns transparent over the real one.
+   Single committed look in co-sheep's own colours (the speech bubbles' navy
+   and pink), day or night by the clock rather than by the host theme. */
+:root {
+  --ink: #1a1a2e;          /* bubble navy */
+  --ink-2: #16213e;
+  --ink-3: #252b4d;
+  --pink: #e94560;         /* bubble border */
+  --pink-hi: #ff6b6b;
+  --text: #ececf3;
+  --muted: #a3a8c3;
+  --good: #4ecca3;
+  --gold: #d4a520;
+  --sleepy: #7b88e0;
+
+  --sky-top: #79aedb;
+  --sky-bottom: #d8ebf3;
+  --hill-far: #9fcb8c;
+  --hill-near: #74ad66;
+  --bar-bg: rgba(248, 249, 252, 0.74);
+  --bar-fg: #1b1d2a;
+  --win-bg: #ffffff;
+  --win-bar: #eceef3;
+  --win-fg: #22243a;
+  --dock-bg: rgba(255, 255, 255, 0.34);
+  --dock-edge: rgba(255, 255, 255, 0.55);
+
+  --font-display: "Silkscreen", "Courier New", monospace;
+  --font-ui: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-bubble: "Courier New", monospace;
+}
+body.night {
+  --sky-top: #0a0c20;
+  --sky-bottom: #1d2245;
+  --hill-far: #1f3934;
+  --hill-near: #162b27;
+  --bar-bg: rgba(18, 20, 38, 0.74);
+  --bar-fg: #e6e8f3;
+  --win-bg: #1e2033;
+  --win-bar: #2a2d45;
+  --win-fg: #dcdff0;
+  --dock-bg: rgba(40, 44, 80, 0.45);
+  --dock-edge: rgba(140, 150, 220, 0.25);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  background: var(--sky-bottom);
+  color: var(--bar-fg);
+  font: 13px/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+body.booting, body.overlay { background: transparent; }
+html:has(body.overlay), html:has(body.booting) { background: transparent; }
+body.booting #stage, body.booting #card,
+body.overlay #stage, body.overlay #card { display: none; }
+body.dragging, body.dragging * { cursor: grabbing !important; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--pink-hi); outline-offset: 2px; }
+
+/* ── Pretend desktop ─────────────────────────────────────────────────────── */
+#stage { position: fixed; inset: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+#wallpaper {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(160% 70% at 16% 116%, var(--hill-near) 0 50%, transparent 50.4%),
+    radial-gradient(130% 62% at 92% 120%, var(--hill-far) 0 52%, transparent 52.4%),
+    radial-gradient(40% 30% at 84% 12%, rgba(255, 244, 214, 0.55), transparent 70%),
+    linear-gradient(180deg, var(--sky-top), var(--sky-bottom) 72%);
+}
+body.night #wallpaper {
+  background:
+    radial-gradient(160% 70% at 16% 116%, var(--hill-near) 0 50%, transparent 50.4%),
+    radial-gradient(130% 62% at 92% 120%, var(--hill-far) 0 52%, transparent 52.4%),
+    linear-gradient(180deg, var(--sky-top), var(--sky-bottom) 72%);
+}
+
+#menubar {
+  position: absolute; top: 0; left: 0; right: 0; height: 28px; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  padding: env(safe-area-inset-top, 0px) max(10px, env(safe-area-inset-right, 0px)) 0 max(10px, env(safe-area-inset-left, 0px));
+  background: var(--bar-bg); color: var(--bar-fg);
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+  font-size: 12.5px; white-space: nowrap;
+}
+#menubar .app { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.02em; padding: 0 8px 0 2px; }
+.mb-btn {
+  border: 0; background: none; height: 22px; padding: 0 8px; border-radius: 5px; cursor: default;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.mb-btn:hover, .mb-btn[aria-expanded="true"] { background: rgba(127, 127, 160, 0.22); }
+.mb-spacer { flex: 1; }
+#mb-clock { font-variant-numeric: tabular-nums; padding: 0 4px 0 8px; }
+.sheep-glyph {
+  display: inline-block; width: 18px; height: 18px;
+  background-size: 36px 18px; background-position: 0 0; background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+#mb-help { font-weight: 600; }
+
+.win {
+  position: absolute; z-index: 5; width: 360px; max-width: calc(100vw - 32px);
+  background: var(--win-bg); color: var(--win-fg);
+  border-radius: 11px; overflow: hidden;
+  box-shadow: 0 18px 40px rgba(10, 14, 40, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.win.focused { box-shadow: 0 24px 54px rgba(10, 14, 40, 0.36), 0 0 0 1px rgba(0, 0, 0, 0.16); }
+.win-bar {
+  height: 30px; display: grid; grid-template-columns: 60px 1fr 60px; align-items: center;
+  padding: 0 10px; background: var(--win-bar); cursor: grab; font-size: 12px;
+}
+.win-bar .title { text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
+.lights { display: flex; gap: 7px; }
+.lights span, .win-close { width: 12px; height: 12px; border-radius: 50%; border: 0; padding: 0; }
+.win-close { background: #ff5f57; cursor: pointer; }
+.lights .min { background: #febc2e; }
+.lights .max { background: #28c840; }
+.term {
+  background: #11121b; color: #c9cee6; margin: 0; padding: 12px 14px 14px;
+  font: 12px/1.6 var(--font-ui); min-height: 128px; white-space: pre-wrap;
+}
+.term .p { color: #7ee2a8; }
+.term .ok { color: #7ee2a8; }
+.term .cur { display: inline-block; width: 7px; height: 13px; background: #c9cee6; vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.notes { padding: 10px 14px 14px; max-height: 210px; overflow: auto; }
+.notes h2 { font: 600 13px/1.3 var(--font-ui); margin: 2px 0 8px; }
+#diary-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+#diary-list time { opacity: 0.55; font-variant-numeric: tabular-nums; }
+.muted { opacity: 0.6; }
+
+#dock {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 10px; padding: 7px 9px; border-radius: 18px;
+  background: var(--dock-bg); border: 1px solid var(--dock-edge);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.dock-tile {
+  width: 44px; height: 44px; border-radius: 11px; border: 0; padding: 0; cursor: pointer;
+  display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease;
+}
+.dock-tile:hover { transform: translateY(-4px); }
+.tile-term { background: #1c1d27; color: #7ee2a8; font: 700 14px var(--font-ui); }
+.tile-notes {
+  background:
+    linear-gradient(#ffd34d 0 30%, transparent 30%),
+    repeating-linear-gradient(180deg, transparent 0 7px, #d9d9e0 7px 8px) 0 16px / 100% 70% no-repeat,
+    #fff;
+}
+.tile-sheep { background: var(--ink); }
+.tile-sheep .sheep-glyph { width: 32px; height: 32px; background-size: 64px 32px; }
+
+/* ── The flock ───────────────────────────────────────────────────────────── */
+#sheep-canvas { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+
+/* Speech bubbles: the app's own look (legacy styles.css). */
+.speech-bubble {
+  position: fixed; transform: translateX(-50%);
+  background: var(--ink); color: #eee; padding: 12px 16px; border-radius: 12px;
+  font: 14px/1.4 var(--font-bubble); max-width: 300px; min-width: 120px; z-index: 1000;
+  border: 2px solid var(--pink); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); pointer-events: none;
+}
+.speech-bubble::before {
+  content: ""; position: absolute; bottom: -11px; left: 50%; transform: translateX(-50%);
+  border-left: 11px solid transparent; border-right: 11px solid transparent;
+  border-top: 11px solid var(--bubble-border-color, var(--pink));
+}
+.speech-bubble::after {
+  content: ""; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
+  border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid var(--ink);
+}
+.input-bubble { pointer-events: auto; padding-right: 34px; min-width: 260px; }
+.input-bubble-form { display: flex; gap: 8px; margin-top: 10px; }
+.input-bubble-input {
+  flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--pink); border-radius: 6px;
+  background: var(--ink-2); color: #eee; font: 13px var(--font-bubble); outline: none;
+}
+.input-bubble-input:focus { border-color: var(--pink-hi); box-shadow: 0 0 6px rgba(233, 69, 96, 0.3); }
+.input-bubble-button {
+  padding: 6px 14px; background: var(--pink); color: #fff; border: 0; border-radius: 6px;
+  cursor: pointer; font: bold 13px var(--font-bubble);
+}
+.input-bubble-button:hover { background: var(--pink-hi); }
+.input-bubble-input:disabled, .input-bubble-button:disabled { opacity: 0.5; }
+.input-bubble-loading { font-style: italic; color: #888; padding: 4px 0; }
+.input-bubble-reply { margin-top: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
+.input-bubble-reply-error { color: var(--pink-hi); font-style: italic; }
+.input-bubble-close {
+  position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); font: 18px/1 var(--font-ui); cursor: pointer;
+}
+.input-bubble-close:hover { color: #fff; background: rgba(233, 69, 96, 0.35); }
+
+/* ── Chrome in bubble colours: card, panel, menus ────────────────────────── */
+#card, #panel, .menu { color-scheme: dark; color: var(--text); }
+#card {
+  position: fixed; z-index: 30;
+  top: calc(40px + env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  width: min(330px, calc(100vw - 32px));
+  background: var(--ink); border: 2px solid var(--pink); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(10, 10, 30, 0.35);
+  padding: 14px 16px 14px; display: grid; gap: 10px; font-size: 12.5px;
+}
+#card h1 {
+  margin: 0; padding-right: 24px; font: 15px/1.25 var(--font-display); color: var(--pink-hi);
+  letter-spacing: 0.02em; text-wrap: balance;
+}
+#card p { margin: 0; color: #d6d8e8; }
+.howto { margin: 0; padding: 10px 0 0; border-top: 1px dashed #3a4170; list-style: none; display: grid; gap: 5px; color: var(--muted); }
+.howto li::before { content: "▸ "; color: var(--pink); }
+.howto b { color: var(--text); font-weight: 600; }
+.icon-btn {
+  position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%;
+  border: 0; background: transparent; color: var(--muted); font: 18px/1 var(--font-ui); cursor: pointer;
+}
+.icon-btn:hover { color: #fff; background: rgba(233, 69, 96, 0.3); }
+
+.btn {
+  justify-self: start; border: 1px solid var(--pink); background: var(--pink); color: #fff;
+  padding: 7px 14px; border-radius: 7px; font: 600 12.5px var(--font-ui); cursor: pointer;
+}
+.btn:hover { background: var(--pink-hi); border-color: var(--pink-hi); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn.ghost { background: transparent; border-color: #3d4577; color: var(--text); }
+.btn.ghost:hover { border-color: var(--pink); background: rgba(233, 69, 96, 0.12); }
+.btn.danger { background: #b8304a; border-color: #b8304a; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+
+#panel {
+  position: fixed; z-index: 1100; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(470px, calc(100vw - 24px)); max-height: min(660px, calc(100vh - 72px));
+  display: flex; flex-direction: column;
+  background: var(--ink); border: 2px solid var(--pink); border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(8, 8, 24, 0.5); font-size: 12.5px; touch-action: auto;
+}
+#panel-head { display: grid; gap: 10px; padding: 12px 14px 0; cursor: grab; position: relative; user-select: none; }
+#panel-head h2 { margin: 0; font: 15px var(--font-display); color: var(--pink-hi); }
+.tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid #2d3561; }
+.tabs button {
+  border: 0; background: none; padding: 7px 10px 8px; cursor: pointer; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+}
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--pink); }
+#panel-body { overflow: auto; padding: 14px; display: grid; gap: 14px; align-content: start; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: start; }
+.field { display: grid; gap: 5px; min-width: 0; }
+.field label, .field .label, .section {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+.section { margin: 4px 0 -4px; font-weight: 500; }
+input[type="text"], select {
+  width: 100%; background: var(--ink-2); color: var(--text); border: 1px solid #2f3766;
+  border-radius: 7px; padding: 7px 9px; font: 13px var(--font-ui);
+}
+input[type="text"]:focus, select:focus { border-color: var(--pink); outline: none; }
+.hint, .note { margin: 0; color: var(--muted); font-size: 11.5px; }
+.note { padding: 9px 11px; border-radius: 8px; background: var(--ink-3); color: #c9cce0; }
+.checks { display: grid; gap: 7px; }
+.check { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.check input { accent-color: var(--pink); width: 15px; height: 15px; margin: 0; }
+.row-end { display: flex; justify-content: flex-end; gap: 8px; }
+
+.friend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.friend {
+  display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 9px; background: var(--ink-2);
+}
+.dot { width: 12px; height: 12px; border-radius: 50%; }
+.friend-text { display: grid; min-width: 0; }
+.friend-text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub { color: var(--muted); font-size: 11.5px; }
+.friend-actions { display: flex; gap: 6px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--sw); cursor: pointer;
+  border: 2px solid transparent; box-shadow: inset 0 0 0 2px var(--ink);
+}
+.swatch[aria-checked="true"] { border-color: #fff; }
+
+.chip {
+  display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px;
+  background: var(--ink-3); color: var(--text); white-space: nowrap;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mood-happy { background: rgba(78, 204, 163, 0.2); color: #8ff0cc; }
+.mood-excited { background: rgba(212, 165, 32, 0.22); color: #f3cf62; }
+.mood-grumpy { background: rgba(233, 69, 96, 0.22); color: #ff9aa9; }
+.mood-sleepy { background: rgba(123, 136, 224, 0.22); color: #b6c0ff; }
+
+.wardrobe-top { display: flex; gap: 14px; align-items: center; }
+.wardrobe-top > canvas { background: radial-gradient(circle at 50% 70%, #2a3160, var(--ink-2)); border-radius: 12px; flex: none; }
+.wardrobe-who { display: grid; gap: 8px; flex: 1; min-width: 0; }
+.wardrobe { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+.acc {
+  display: grid; justify-items: center; gap: 2px; padding: 6px 4px 8px; border-radius: 9px;
+  background: var(--ink-2); border: 1px solid #2a3160; cursor: pointer; font-size: 11px; color: var(--muted);
+}
+.acc:hover { border-color: #46508a; color: var(--text); }
+.acc[aria-pressed="true"] { border-color: var(--pink); background: #2b1f3d; color: var(--text); }
+
+.brain-card { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--ink-2); }
+.brain-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.brain-card p { margin: 0; }
+.affinity { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; }
+.affinity li { display: grid; grid-template-columns: minmax(0, 7.5em) 1fr 2.5em; align-items: center; gap: 8px; font-size: 11.5px; }
+.affinity .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.affinity .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bar { height: 6px; border-radius: 3px; background: #2a2f55; position: relative; overflow: hidden; }
+.bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); background: var(--good); border-radius: 3px; }
+.bar.neg::after { background: var(--pink); }
+.memories, .plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 11.5px; color: #c9cce0; }
+.memories time { color: var(--muted); font-variant-numeric: tabular-nums; }
+code { font: 11px var(--font-ui); background: var(--ink-3); padding: 1px 5px; border-radius: 4px; color: #ffb3bf; }
+
+.menu {
+  position: fixed; z-index: 1200; min-width: 250px; padding: 5px;
+  background: rgba(26, 26, 46, 0.97); border: 1px solid #3a4170; border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(5, 5, 20, 0.45); display: grid; font-size: 12.5px;
+  max-height: calc(100vh - 16px); overflow: auto;
+}
+.menu-item {
+  display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 4px; text-align: left;
+  border: 0; background: none; padding: 5px 10px 5px 6px; border-radius: 6px; cursor: pointer;
+}
+.menu-item.nested { padding-left: 16px; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--pink); color: #fff; outline: none; }
+.menu-check { color: var(--pink-hi); }
+.menu-item:hover .menu-check { color: #fff; }
+.menu-heading { padding: 6px 10px 2px; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.menu-sep { height: 1px; background: #2f3766; margin: 4px 6px; }
+
+@media (max-width: 520px) {
+  #mb-clock, .mb-hide-narrow { display: none; }
+  #card { top: auto; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .tabs button { padding: 7px 7px 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .term .cur { animation: none; }
+  .dock-tile { transition: none; }
+}
+</style>
+
+<div id="stage">
+  <div id="wallpaper"></div>
+
+  <header id="menubar">
+    <span class="sheep-glyph" aria-hidden="true"></span>
+    <span class="app">co-sheep</span>
+    <button class="mb-btn" id="mb-flock" type="button" data-menu aria-haspopup="menu" aria-expanded="false">Flock</button>
+    <span class="mb-spacer"></span>
+    <button class="mb-btn" id="mb-help" type="button" hidden aria-label="Show how to play">?</button>
+    <button class="mb-btn" id="mb-tray" type="button" data-menu aria-haspopup="menu" aria-expanded="false" aria-label="co-sheep menu">
+      <span class="sheep-glyph" aria-hidden="true"></span>
+    </button>
+    <span id="mb-clock" aria-label="Time"></span>
+  </header>
+
+  <section class="win" id="win-term" data-app="Terminal" aria-label="Terminal window">
+    <div class="win-bar">
+      <div class="lights"><button class="win-close" type="button" aria-label="Close Terminal"></button><span class="min"></span><span class="max"></span></div>
+      <div class="title">zsh — co-sheep</div>
+      <div></div>
+    </div>
+<pre class="term"><span class="p">~/co-sheep $</span> swift build
+Building for debugging...
+Build complete! (4.21s)
+<span class="p">~/co-sheep $</span> swift test
+<span class="ok">✔</span> All tests passed. No sheep were harmed.
+<span class="p">~/co-sheep $</span> <span class="cur"></span></pre>
+  </section>
+
+  <section class="win" id="win-notes" data-app="Notes" aria-label="Notes window">
+    <div class="win-bar">
+      <div class="lights"><button class="win-close" type="button" aria-label="Close Notes"></button><span class="min"></span><span class="max"></span></div>
+      <div class="title">diary.md — Notes</div>
+      <div></div>
+    </div>
+    <div class="notes">
+      <h2>The sheep's diary</h2>
+      <ul id="diary-list"></ul>
+    </div>
+  </section>
+
+  <nav id="dock" aria-label="Dock">
+    <button class="dock-tile tile-term" type="button" data-open="win-term" title="Terminal" aria-label="Terminal">&gt;_</button>
+    <button class="dock-tile tile-notes" type="button" data-open="win-notes" title="Notes" aria-label="Notes"></button>
+    <button class="dock-tile tile-sheep" type="button" data-open="panel" title="co-sheep settings" aria-label="co-sheep settings"><span class="sheep-glyph" aria-hidden="true"></span></button>
+  </nav>
+</div>
+
+<canvas id="sheep-canvas" aria-label="The flock"></canvas>
+
+<aside id="card" class="interactive" aria-labelledby="card-title">
+  <button class="icon-btn" id="card-close" type="button" aria-label="Hide this card">×</button>
+  <h1 id="card-title">This is the pasture</h1>
+  <p id="card-body">Open this artifact in the Claude desktop app and choose Install as app: the flock then moves onto your real desktop.</p>
+  <button class="btn" id="card-action" type="button" hidden></button>
+  <ul class="howto">
+    <li><b>Drag</b> a sheep. Let go up high and it parachutes.</li>
+    <li><b>Double-click</b> to poke. <b>Hover</b> two seconds to pet.</li>
+    <li><b>Right-click</b> the white sheep to chat.</li>
+    <li><b>Drop</b> one sheep on another to stack them.</li>
+    <li><b>Shake</b> the mouse hard for a stampede.</li>
+  </ul>
+</aside>
+
+<div id="panel" class="interactive" role="dialog" aria-labelledby="panel-title" hidden>
+  <div id="panel-head">
+    <h2 id="panel-title">co-sheep</h2>
+    <button class="icon-btn" id="panel-close" type="button" aria-label="Close settings">×</button>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="sheep" aria-selected="true">Settings</button>
+      <button type="button" role="tab" data-tab="friends" aria-selected="false">Friends</button>
+      <button type="button" role="tab" data-tab="wardrobe" aria-selected="false">Wardrobe</button>
+      <button type="button" role="tab" data-tab="brain" aria-selected="false">Relationships</button>
+    </div>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<script>document.body.classList.add(window.claude && window.claude.use ? "booting" : "pasture");</script>
+<script>/*BUNDLE*/</script>
